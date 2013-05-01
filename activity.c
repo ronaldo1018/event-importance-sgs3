@@ -19,8 +19,8 @@
  * @file activity.c
  * @brief control activity
  * @author Po-Hsien Tseng <steve13814@gmail.com>
- * @version 20130317
- * @date 2013-03-17
+ * @version 20130409
+ * @date 2013-04-09
  */
 #include "activity.h"
 #include "thread.h"
@@ -54,6 +54,7 @@ void initialize_activity(void)
 	INFO(("initialize activity\n"));
 
 	// initialize current activity and change importance of foreground thread to mid
+	curActivityPid = getCurActivityPid();
 	getCurActivityThrs(curActivityThrVec);
 	length = vector_length(curActivityThrVec);
 	for(i = 0; i < length; i++)
@@ -100,7 +101,6 @@ bool check_activity_change(vector *becomeBGThrVec, vector *becomeFGThrVec)
 void getCurActivityThrs(vector *vec)
 {
 	INFO(("get current activity threads\n"));
-	curActivityPid = getCurActivityPid();
 	if(curActivityPid != -1)
 	{
 		vector_remove_all(vec);
@@ -109,7 +109,7 @@ void getCurActivityThrs(vector *vec)
 }
 
 /**
- * @brief getCurActivityPid use dumpsys activity top to get current activity pid
+ * @brief getCurActivityPid use 'dumpsys activity top' to get current activity pid
  *
  * @return current activity pid, -1 on error
  */
@@ -164,6 +164,7 @@ static int getCurActivityPid(void)
 static void putThreadGroupToVector(vector *threadGroup, int pid)
 {
 	char buff[BUFF_SIZE];
+	char tmp[1024] = "";
 	DIR *d;
 	struct dirent *de;
 	INFO(("put thread group of %d into vector\n", pid));
@@ -174,18 +175,20 @@ static void putThreadGroupToVector(vector *threadGroup, int pid)
 	sprintf(buff, "/proc/%d/task", pid);
 	if((d = opendir(buff)) != NULL)
 	{
-		INFO(("Threads "));
+		strcat(tmp, "Threads ");
 		while((de = readdir(d)) != 0)
 		{
 			if(isdigit(de->d_name[0]))
 			{
 				pid = atoi(de->d_name);
-				INFO(("%d ", pid));
+				sprintf(buff, "%d ", pid);
+				strcat(tmp, buff);
 				vector_push(threadGroup, &pid);
 			}
 		}
 		closedir(d);
-		INFO(("are pushed to the same group\n"));
+		strcat(tmp, "are pushed to the same group\n");
+		INFO(("%s\n", tmp));
 	}
 	else
 	{

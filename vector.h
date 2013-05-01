@@ -2,8 +2,8 @@
  * @file vector.h
  * @brief header file that implement vectors in c
  * @author Hamid Alipour <http://codingrecipes.com/implementation-of-a-vector-data-structure-in-c>
- * @version 20130317
- * @date 2013-03-17
+ * @version 20130409
+ * @date 2013-04-09
  */
 #ifndef __VECTOR_H__
 #define __VECTOR_H__

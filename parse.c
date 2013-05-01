@@ -19,13 +19,39 @@
  * @file parse.c
  * @brief parsing functions
  * @author Po-Hsien Tseng <steve13814@gmail.com>
- * @version 20130317
- * @date 2013-03-17
+ * @version 20130409
+ * @date 2013-04-09
  */
 #include "parse.h"
 #include <stdio.h>
 #include <stdlib.h>
 #define BUFF_SIZE 256
+
+/**
+ * @brief parseString parse space seperated data, column start from zero
+ *
+ * @param path where to parse
+ * @param target place where data will store
+ * @param col get col-th data to target
+ * @param failbit will set to 1 if cannot parse
+ */
+void parseString(char *path, int col, char *target, bool *failbit)
+{
+	int i = 0;
+	char buff[BUFF_SIZE];
+	FILE *fp = fopen(path, "r");
+	if(fp)
+	{
+		while(i++ != col && fscanf(fp, "%s", buff));
+		fscanf(fp, "%s", target);
+		(*failbit) = 0;
+		fclose(fp);
+	}
+	else
+	{
+		(*failbit) = 1;
+	}
+}
 
 /**
  * @brief parseInt parse space seperated data, column and row number start from zero

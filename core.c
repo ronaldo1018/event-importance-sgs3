@@ -19,8 +19,8 @@
  * @file core.c
  * @brief control cpu core
  * @author Po-Hsien Tseng <steve13814@gmail.com>
- * @version 20130317
- * @date 2013-03-17
+ * @version 20130409
+ * @date 2013-04-09
  */
 #include "core.h"
 #include "config.h"
@@ -37,6 +37,7 @@
 extern THREADATTR threadSet[];
 extern COREATTR coreSet[];
 extern bool touchIsOn;
+extern float elapseTime;
 extern int curFreq;
 extern int maxFreq;
 
@@ -52,6 +53,56 @@ static unsigned long long freqTable[MAX_FREQ];
 static int numOfFreq = 0;
 
 /**
+ * @brief record history number of process running
+ */
+static int procRunningHistory[CONFIG_NUM_OF_PROCESS_RUNNING_HISTORY_ENTRIES];
+
+/**
+ * @brief record last entry index in procRunningHistory
+ */
+static int procRunningIndex = 0;
+
+/**
+ * @brief summation of number of process running of all history entries
+ */
+static int sumProcRunning = 0;
+
+/**
+ * @brief average value of number of process running
+ */
+static int avgProcRunning = 0;
+
+/**
+ * @brief record history utilization for coarse-grained core-level dvfs
+ */
+//static float utilHistory[CONFIG_NUM_OF_HISTORY_ENTRIES];
+
+/**
+ * @brief record last entry index in utilHistroy array
+ */
+//static int utilHistoryIndex = 0;
+
+/**
+ * @brief average value of utilization history
+ */
+//static float avgUtil = 0;
+
+/**
+ * @brief record history mid utilization for fine-grained thread-level dvfs
+ */
+static float midUtilHistory[CONFIG_NUM_OF_HISTORY_ENTRIES];
+
+/**
+ * @brief record last entry index in midUtilHistroy array
+ */
+static int midUtilHistoryIndex = 0;
+
+/**
+ * @brief average value of mid utilization history
+ */
+static float avgMidUtil = 0;
+
+/**
  * @brief number of cores that are currently online
  */
 static int numOfCoresOnline = 0;
@@ -59,7 +110,7 @@ static int numOfCoresOnline = 0;
 /**
  * @brief frequency threshold to turn on 2, 3, 4 cores
  */
-static int Thres[3] = {THRESHOLD2, THRESHOLD3, THRESHOLD4};
+static int Thres[3] = {CONFIG_THRESHOLD2, CONFIG_THRESHOLD3, CONFIG_THRESHOLD4};
 
 // frequency
 static void getFrequencyTable(void);
@@ -90,10 +141,10 @@ void initialize_cores(void)
 	FILE *fp;
 	INFO(("initialize cores\n"));
 
-	memset(coreSet, 0, sizeof(COREATTR) * NUM_OF_CORE);
+	memset(coreSet, 0, sizeof(COREATTR) * CONFIG_NUM_OF_CORE);
 	
 	// core
-	for(i = 0; i < NUM_OF_CORE; i++)
+	for(i = 0; i < CONFIG_NUM_OF_CORE; i++)
 	{
 		// open all cores temporary to know each core's busy and idle
 		sprintf(buff, "/sys/devices/system/cpu/cpu%d/online", i);
@@ -105,7 +156,7 @@ void initialize_cores(void)
 			fclose(fp);
 		}
 	}
-	numOfCoresOnline = NUM_OF_CORE;
+	numOfCoresOnline = CONFIG_NUM_OF_CORE;
 
 	// busy, idle
 	fp = fopen(CPUINFO_PATH, "r");
@@ -116,14 +167,30 @@ void initialize_cores(void)
 		{
 			sscanf(buff, "cpu%d %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu", &coreId, &cpuinfo[0], &cpuinfo[1], &cpuinfo[2], &cpuinfo[3], &cpuinfo[4], &cpuinfo[5], &cpuinfo[6], &cpuinfo[7], &cpuinfo[8], &cpuinfo[9]); // time(unit: jiffies) spent of all cpus for: user nice system idle iowait irq softirq stead guest
 			coreSet[coreId].busy = cpuinfo[0] + cpuinfo[1] + cpuinfo[2] + cpuinfo[4] + cpuinfo[5] + cpuinfo[6] + cpuinfo[7] + cpuinfo[8] + cpuinfo[9];
+			coreSet[coreId].nice_busy = cpuinfo[1];
 			coreSet[coreId].idle = cpuinfo[3];
 			
-			if(coreId == NUM_OF_CORE - 1)
+			if(coreId == CONFIG_NUM_OF_CORE - 1)
 				break;
 		}
 		fclose(fp);
 	}
 	
+	/* debug only */
+	//for(i = 1; i < CONFIG_NUM_OF_CORE; i++)
+	//{
+	//	// open all cores temporary to know each core's busy and idle
+	//	sprintf(buff, "/sys/devices/system/cpu/cpu%d/online", i);
+	//	fp = fopen(buff, "w");
+	//	if(fp)
+	//	{
+	//		fprintf(fp, "0\n");
+	//		coreSet[i].online = false;
+	//		fclose(fp);
+	//	}
+	//}
+	//numOfCoresOnline = 1;
+
 	// frequency
 	getFrequencyTable();
 	if(CONFIG_TURN_ON_DVFS)
@@ -132,6 +199,11 @@ void initialize_cores(void)
 	}
 	curFreq = getCurFreq();
 	INFO(("max frequency = %d\n", maxFreq));
+
+	for(i = 0; i < CONFIG_NUM_OF_PROCESS_RUNNING_HISTORY_ENTRIES; i++)
+		procRunningHistory[i] = 1;
+	sumProcRunning = CONFIG_NUM_OF_PROCESS_RUNNING_HISTORY_ENTRIES;
+	memset(midUtilHistory, 0, sizeof(float) * CONFIG_NUM_OF_HISTORY_ENTRIES);
 }
 
 /**
@@ -187,21 +259,28 @@ void DPM(void)
 		return;
 	INFO(("DPM\n"));
 	
-	// get number of process running
+	// get number of process running and update table
 	numOfProcessRunning = getNumProcessRunning();
-	if(numOfProcessRunning < 0) // something error
+	if(numOfProcessRunning < 1) // something wrong
 		numOfProcessRunning = 1; // at least our process is running
 
+	procRunningIndex = (procRunningIndex + 1) % CONFIG_NUM_OF_PROCESS_RUNNING_HISTORY_ENTRIES;
+	sumProcRunning -= procRunningHistory[procRunningIndex];
+	procRunningHistory[procRunningIndex] = numOfProcessRunning;
+	sumProcRunning += numOfProcessRunning;
+	avgProcRunning = sumProcRunning / CONFIG_NUM_OF_PROCESS_RUNNING_HISTORY_ENTRIES;
+
 	// get utilization sum
-	for(i = 0; i < NUM_OF_CORE; i++)
+	for(i = 0; i < CONFIG_NUM_OF_CORE; i++)
 	{
 		utilSum += coreSet[i].util;
 	}
 	INFO(("utilization sum = %f\n", utilSum));
 
 	// get number of cores that should online
-	for(i = 0; i < NUM_OF_CORE - 1; i++)
+	for(i = 0; i < CONFIG_NUM_OF_CORE - 1; i++)
 	{
+		//if(Thres[i] * (i+1) > utilSum)
 		if(Thres[i] > utilSum)
 		{
 			break;
@@ -209,7 +288,7 @@ void DPM(void)
 	}
 
 	// if there are not enough processes are running, more cores are useless
-	numOfCoresShouldOpen = i+1 > numOfProcessRunning ? numOfProcessRunning:i+1;
+	numOfCoresShouldOpen = i+1 > avgProcRunning ? avgProcRunning:i+1;
 	INFO(("should open %d core, currently open %d core\n", numOfCoresShouldOpen, numOfCoresOnline));
 
 	// setup core
@@ -253,9 +332,7 @@ void assign_core(int pid, int coreId, bool firstAssign)
 	{
 		coreSet[coreId].sumOfImportance += threadSet[pid].importance;
 		coreSet[coreId].numOfThreads++;
-		coreSet[coreId].util += threadSet[pid].util;
-		if(threadSet[pid].importance >= IMPORTANCE_MID)
-			coreSet[coreId].midUtil += threadSet[pid].util;
+		coreSet[coreId].execTime += threadSet[pid].execTime;
 	}
 	else
 	{
@@ -267,18 +344,32 @@ void assign_core(int pid, int coreId, bool firstAssign)
 		coreSet[oldCoreId].numOfThreads--;
 		coreSet[coreId].numOfThreads++;
 
-		coreSet[oldCoreId].util -= threadSet[pid].util;
-		coreSet[coreId].util += threadSet[pid].util;
+		coreSet[oldCoreId].execTime -= threadSet[pid].execTime;
+		coreSet[coreId].execTime += threadSet[pid].execTime;
+
+		coreSet[oldCoreId].util = execTimeToUtil(coreSet[oldCoreId].execTime);
+		coreSet[coreId].util = execTimeToUtil(coreSet[coreId].execTime);
 
 		if(threadSet[pid].importance >= IMPORTANCE_MID)
 		{
-			coreSet[oldCoreId].midUtil -= threadSet[pid].util;
-			coreSet[coreId].midUtil += threadSet[pid].util;
+			coreSet[oldCoreId].midExecTime -= threadSet[pid].execTime;
+			coreSet[coreId].midExecTime += threadSet[pid].execTime;
+
+			coreSet[oldCoreId].midUtil = execTimeToUtil(coreSet[oldCoreId].midExecTime);
+			coreSet[coreId].midUtil = execTimeToUtil(coreSet[coreId].midExecTime);
 		}
 	}
 	threadSet[pid].coreId = coreId;
 	mask = 1 << coreId;
 	syscall(__NR_sched_setaffinity, pid, sizeof(mask), &mask);
+}
+
+/**
+ * @brief core_dvfs coarse-grained core-level dvfs for pre-assign enough frequency for later calculation
+ */
+void core_dvfs(void)
+{
+	// not yet implemented
 }
 
 /**
@@ -299,7 +390,7 @@ void DVFS(void)
 	else
 	{
 		maxCoreId = 0;
-		for(i = 1; i < NUM_OF_CORE; i++)
+		for(i = 1; i < CONFIG_NUM_OF_CORE; i++)
 		{
 			DVFS_INFO(("core %d has midutil %f\n", i, coreSet[i].midUtil));
 			if(coreSet[i].midUtil > coreSet[maxCoreId].midUtil)
@@ -307,7 +398,12 @@ void DVFS(void)
 				maxCoreId = i;
 			}
 		}
-		curFreq = getProperFreq(coreSet[maxCoreId].midUtil);
+		// record utilization in history table
+		midUtilHistoryIndex = (midUtilHistoryIndex + 1) % CONFIG_NUM_OF_HISTORY_ENTRIES;
+		avgMidUtil = avgMidUtil + (coreSet[maxCoreId].midUtil - midUtilHistory[midUtilHistoryIndex]) / CONFIG_NUM_OF_HISTORY_ENTRIES;
+		midUtilHistory[midUtilHistoryIndex] = coreSet[maxCoreId].midUtil;
+
+		curFreq = getProperFreq(avgMidUtil);
 		DVFS_INFO(("max mid util = %f\n", coreSet[maxCoreId].midUtil));
 		DVFS_INFO(("set frequency to %d\n", curFreq));
 		setFreq(curFreq);
@@ -369,11 +465,12 @@ static void getFrequencyTable(void)
 	unsigned long long tmp;
 	FILE *fp;
 	char buff[BUFF_SIZE];
+	char tmpstr[1024] = "";
 	
 	numOfFreq = 0;
-	if(CONFIG_IS_SAMSUNG_FREQUENCY_TABLE)
+	if(CONFIG_USE_TIME_IN_STATE_FREQUENCY_TABLE)
 	{
-		fp = fopen(FREQ_TABLE_SAMSUNG_PATH, "r");
+		fp = fopen(FREQ_TABLE_TIME_IN_STATE_PATH, "r");
 		if(fp)
 		{
 			while(fgets(buff, BUFF_SIZE, fp))
@@ -418,8 +515,11 @@ static void getFrequencyTable(void)
 	maxFreq = freqTable[numOfFreq -1];
 
 	for(i = 0; i < numOfFreq; i++)
-		INFO(("%llu ", freqTable[i]));
-	INFO(("\n"));
+	{
+		sprintf(buff, "%llu ", freqTable[i]);
+		strcat(tmpstr, buff);
+	}
+	INFO(("%s\n", tmpstr));
 }
 
 /**
@@ -454,32 +554,18 @@ static int getCurFreq(void)
  */
 static int getProperFreq(float util)
 {
-	static int count = 0;
-	static int lastFreqLevel = 0;
 	int candidateFreqLevel = 0;
 
 	for(candidateFreqLevel = 0; candidateFreqLevel < numOfFreq - 1; candidateFreqLevel++)
 	{
-		if(freqTable[candidateFreqLevel] * CONFIG_SCALE_UP_RATIO > util)
+		if(freqTable[candidateFreqLevel] > util)
 		{
+			if(freqTable[candidateFreqLevel] * CONFIG_SCALE_UP_RATIO < util)
+				candidateFreqLevel++;
 			break;
 		}
 	}
-	if(candidateFreqLevel >= lastFreqLevel)
-	{
-		count = 0;
-		lastFreqLevel = candidateFreqLevel;
-	}
-	else
-	{
-		count++;
-		if(count > 5)
-		{
-			lastFreqLevel = candidateFreqLevel > 0 ? candidateFreqLevel-1 : 0;
-			count = 0;
-		}
-	}
-	return freqTable[lastFreqLevel];
+	return freqTable[candidateFreqLevel];
 }
 
 /**
@@ -530,6 +616,7 @@ static int getNumProcessRunning(void)
 		destruction();
 		exit(EXIT_FAILURE);
 	}
+	INFO(("process running = %d\n", numOfProcessRunning));
 	return numOfProcessRunning;
 }
 
@@ -542,14 +629,14 @@ static int getFirstOfflineCore(void)
 {
 	int candidateCoreId;
 	// core 0 never offline
-	for(candidateCoreId = 1; candidateCoreId < NUM_OF_CORE; candidateCoreId++)
+	for(candidateCoreId = 1; candidateCoreId < CONFIG_NUM_OF_CORE; candidateCoreId++)
 	{
 		if(!coreSet[candidateCoreId].online)
 		{
 			break;
 		}
 	}
-	if(candidateCoreId == NUM_OF_CORE)
+	if(candidateCoreId == CONFIG_NUM_OF_CORE)
 	{
 		return -1; // no offline core found
 	}
@@ -605,7 +692,7 @@ static void setCore(int coreId, bool turnOn)
 static int getMinImpCore(bool exceptCore0)
 {
 	int i, minCoreId = -1;
-	for(i = exceptCore0 ? 1:0; i < NUM_OF_CORE; i++)
+	for(i = exceptCore0 ? 1:0; i < CONFIG_NUM_OF_CORE; i++)
 	{
 		if(coreSet[i].online)
 		{
@@ -628,7 +715,7 @@ static int getMinImpCore(bool exceptCore0)
 static int getMaxImpCore(void)
 {
 	int i, maxCoreId = 0;
-	for(i = 1; i < NUM_OF_CORE; i++)
+	for(i = 1; i < CONFIG_NUM_OF_CORE; i++)
 		if(coreSet[i].online && coreSet[i].sumOfImportance > coreSet[maxCoreId].sumOfImportance)
 			maxCoreId = i;
 	INFO(("max imp core is %d\n", maxCoreId));
@@ -672,8 +759,8 @@ static void balanceCoreImp(int minCoreId, int maxCoreId)
 static int getMinUtilCore(void)
 {
 	int i, minCoreId = 0;
-	for(i = 1; i < NUM_OF_CORE; i++)
-		if(coreSet[i].online && coreSet[i].util < coreSet[minCoreId].util)
+	for(i = 1; i < CONFIG_NUM_OF_CORE; i++)
+		if(coreSet[i].online && coreSet[i].execTime < coreSet[minCoreId].execTime)
 			minCoreId = i;
 	INFO(("min util core is %d\n", minCoreId));
 	return minCoreId;
@@ -687,8 +774,8 @@ static int getMinUtilCore(void)
 static int getMaxUtilCore(void)
 {
 	int i, maxCoreId = 0;
-	for(i = 1; i < NUM_OF_CORE; i++)
-		if(coreSet[i].online && coreSet[i].util > coreSet[maxCoreId].util)
+	for(i = 1; i < CONFIG_NUM_OF_CORE; i++)
+		if(coreSet[i].online && coreSet[i].execTime > coreSet[maxCoreId].execTime)
 			maxCoreId = i;
 	INFO(("max util core is %d\n", maxCoreId));
 	return maxCoreId;
@@ -736,15 +823,15 @@ static void PourCoreImpUtil(int victimCoreId)
 
 	minImpCoreId = 0;
 	minUtilCoreId = 0;
-	for(i = 1; i < NUM_OF_CORE; i++)
+	for(i = 1; i < CONFIG_NUM_OF_CORE; i++)
 	{
-		if(coreSet[i].online)
+		if(coreSet[i].online && i != victimCoreId)
 		{
 			if(coreSet[i].sumOfImportance < coreSet[minImpCoreId].sumOfImportance)
 			{
 				minImpCoreId = i;
 			}
-			if(coreSet[i].util < coreSet[minUtilCoreId].util)
+			if(coreSet[i].execTime < coreSet[minUtilCoreId].execTime)
 			{
 				minUtilCoreId = i;
 			}

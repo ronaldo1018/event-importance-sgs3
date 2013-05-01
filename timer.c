@@ -19,8 +19,8 @@
  * @file timer.c
  * @brief control timers
  * @author Po-Hsien Tseng <steve13814@gmail.com>
- * @version 20130317
- * @date 2013-03-17
+ * @version 20130409
+ * @date 2013-04-09
  */
 #include "timer.h"
 #include "config.h"
@@ -29,6 +29,9 @@
 #include "common.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
+
+extern bool agingIsOn;
 
 /**
  * @brief initialize_timer initialize timers for utilization sampling and aging
@@ -42,7 +45,7 @@ void initialize_timer(void)
 	fp = fopen(TIMER0_TIME_PATH, "w");
 	if(fp)
 	{
-		fprintf(fp, "%d\n", UTILIZATION_SAMPLING_TIME);
+		fprintf(fp, "%d\n", CONFIG_UTILIZATION_SAMPLING_TIME);
 		fclose(fp);
 	}
 	else
@@ -66,11 +69,12 @@ void initialize_timer(void)
 
 	if(!CONFIG_TURN_ON_AGING)
 		return;
+	agingIsOn = true;
 	// initialize second timer for aging
 	fp = fopen(TIMER1_TIME_PATH, "w");
 	if(fp)
 	{
-		fprintf(fp, "%d\n", INITIAL_AGING_TIME);
+		fprintf(fp, "%d\n", CONFIG_INITIAL_AGING_TIME);
 		fclose(fp);
 	}
 	else
@@ -218,7 +222,7 @@ void turn_on_temp_mid_timer(void)
 	fp = fopen(TIMER2_TIME_PATH, "w");
 	if(fp)
 	{
-		fprintf(fp, "%d\n", TMP_MID_TIME);
+		fprintf(fp, "%d\n", CONFIG_TMP_MID_TIME);
 		fclose(fp);
 	}
 	else
@@ -253,7 +257,7 @@ void turn_on_temp_high_timer(void)
 	fp = fopen(TIMER3_TIME_PATH, "w");
 	if(fp)
 	{
-		fprintf(fp, "%d\n", TMP_HIGH_TIME);
+		fprintf(fp, "%d\n", CONFIG_TMP_HIGH_TIME);
 		fclose(fp);
 	}
 	else

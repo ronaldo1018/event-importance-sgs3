@@ -19,12 +19,25 @@
  * @file debug.c
  * @brief debug functions
  * @author Po-Hsien Tseng <steve13814@gmail.com>
- * @version 20130317
- * @date 2013-03-17
+ * @version 20130409
+ * @date 2013-04-09
  */
 #include "debug.h"
 #include <stdarg.h>
 #include <stdio.h>
+#include <sys/time.h> // gettimeofday()
+
+static struct timeval startTime;
+static struct timeval curTime;
+static struct timezone timez;
+
+/**
+ * @brief initialize_debug initialize startTime to know how long this process has run
+ */
+void initialize_debug(void)
+{
+	gettimeofday(&startTime, &timez);
+}
 
 /**
  * @brief dbg_printf debug printing function
@@ -35,6 +48,10 @@
 void dbg_printf(const char *fmt, ...)
 {
     va_list args;
+
+	gettimeofday(&curTime, &timez);
+	fprintf(stderr, "%f: ", curTime.tv_sec - startTime.tv_sec + (float)(curTime.tv_usec - startTime.tv_usec) / 1000000.0);
+
     va_start(args, fmt);
     vfprintf(stderr, fmt, args);
     va_end(args);

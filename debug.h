@@ -19,8 +19,8 @@
  * @file debug.h
  * @brief header file that define debug functions
  * @author Po-Hsien Tseng <steve13814@gmail.com>
- * @version 20130317
- * @date 2013-03-17
+ * @version 20130409
+ * @date 2013-04-09
  */
 #ifndef __DEBUG_H__
 #define __DEBUG_H__
@@ -30,6 +30,7 @@
 #define ERR(x) do { if (DEBUG_ERR) dbg_printf x; } while (0)
 #define INFO(x) do { if (DEBUG_INFO) dbg_printf x; } while (0)
 #define DVFS_INFO(x) do { if (DEBUG_DVFS_INFO) dbg_printf x; } while (0)
+void initialize_debug(void);
 void dbg_printf(const char *fmt, ...);
 
 #endif // __DEBUG_H__

@@ -19,8 +19,8 @@
  * @file touch.c
  * @brief control screen touch
  * @author Po-Hsien Tseng <steve13814@gmail.com>
- * @version 20130317
- * @date 2013-03-17
+ * @version 20130409
+ * @date 2013-04-09
  */
 #include "touch.h"
 #include "config.h"
@@ -44,7 +44,7 @@ void initialize_touch(void)
 		{
 			while(fgets(buff, BUFF_SIZE, fp))
 			{
-				if(strstr(buff, TOUCH_INTERRUPT_DRIVER))
+				if(strstr(buff, CONFIG_TOUCH_INTERRUPT_DRIVER))
 				{
 					sscanf(buff, "%s %d %s", tmp, &lastTouchCount, tmp);
 					break;
@@ -74,7 +74,7 @@ bool check_screen_touch(void)
 	{
 		while(fgets(buff, BUFF_SIZE, fp))
 		{
-			if(strstr(buff, TOUCH_INTERRUPT_DRIVER))
+			if(strstr(buff, CONFIG_TOUCH_INTERRUPT_DRIVER))
 			{
 				sscanf(buff, "%s %u %s", tmp, &touchCount, tmp);
 				if(touchCount > lastTouchCount)

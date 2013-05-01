@@ -19,8 +19,8 @@
  * @file netlink.h
  * @brief header file that control netlink socket
  * @author Po-Hsien Tseng <steve13814@gmail.com>
- * @version 20130317
- * @date 2013-03-17
+ * @version 20130409
+ * @date 2013-04-09
  */
 #ifndef __NETLINK_H__
 #define __NETLINK_H__

@@ -2,8 +2,8 @@
  * @file vector.c
  * @brief implement vectors in c
  * @author Hamid Alipour <http://codingrecipes.com/implementation-of-a-vector-data-structure-in-c>, bug fixed by Po-Hsien Tseng <steve13814@gmail.com>
- * @version 20130317
- * @date 2013-03-17
+ * @version 20130409
+ * @date 2013-04-09
  */
 #include "vector.h"
 #include <stdio.h>

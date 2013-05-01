@@ -19,8 +19,8 @@
  * @file core.h
  * @brief header file that control cpu core
  * @author Po-Hsien Tseng <steve13814@gmail.com>
- * @version 20130317
- * @date 2013-03-17
+ * @version 20130409
+ * @date 2013-04-09
  */
 #ifndef __CORE_H__
 #define __CORE_H__
@@ -28,7 +28,7 @@
 #define GOVERNOR_PATH "/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor"
 #define FREQ_PATH "/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq"
 #define FREQ_TABLE_PATH "/sys/devices/system/cpu/cpu0/cpufreq/scaling_available_frequencies"
-#define FREQ_TABLE_SAMSUNG_PATH "/sys/devices/system/cpu/cpu0/cpufreq/stats/time_in_state"
+#define FREQ_TABLE_TIME_IN_STATE_PATH "/sys/devices/system/cpu/cpu0/cpufreq/stats/time_in_state"
 #define FREQ_SET_PATH "/sys/devices/system/cpu/cpu0/cpufreq/scaling_setspeed"
 #define CPUINFO_PATH "/proc/stat"
 #include <stdbool.h>
@@ -39,15 +39,19 @@ typedef struct _COREATTR
 	int sumOfImportance;
 	int numOfThreads;
 	unsigned long long busy;
+	unsigned long long nice_busy; // count only busy time with processes' nice value > 0
 	unsigned long long idle;
-	double util; // must be normalized to max level of frequency
-	double midUtil; // ignore low importance thread's util
+	int execTime; // execution time in last period in jiffies
+	int  midExecTime; // execution time only count mid importance thread in last period in jiffies
+	float util; // must be normalized to max level of frequency
+	float midUtil; // ignore low importance thread's util
 } COREATTR;
 
 void initialize_cores(void);
 bool check_core_util_up(void);
 void DPM(void);
 void assign_core(int pid, int coreId, bool firstAssign);
+void core_dvfs(void);
 void DVFS(void);
 void setFreq(int freq);
 void migration(void);

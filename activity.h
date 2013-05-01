@@ -19,8 +19,8 @@
  * @file activity.h
  * @brief header file that control activity
  * @author Po-Hsien Tseng <steve13814@gmail.com>
- * @version 20130317
- * @date 2013-03-17
+ * @version 20130409
+ * @date 2013-04-09
  */
 #ifndef __ACTIVITY_H__
 #define __ACTIVITY_H__

@@ -19,8 +19,8 @@
  * @file thread.h
  * @brief header file that control threads
  * @author Po-Hsien Tseng <steve13814@gmail.com>
- * @version 20130317
- * @date 2013-03-17
+ * @version 20130409
+ * @date 2013-04-09
  */
 #ifndef __THREAD_H__
 #define __THREAD_H__
@@ -34,15 +34,17 @@ typedef struct _THREADATTR
 	bool isSysThr; // whether if it's a system service or application
 	enum IMPORTANCE_VALUE importance; // importance value of a thread(currently 0(low) or 1(mid) or 2(high))
 	int originalNice; // original nice value of a thread
-	int oldutime, oldstime, utime, stime; // executed time in jiffies
-	float util; // utilization 
+	int oldutime, oldstime, utime, stime; // aggregated execution time in jiffies
+	int execTime; // execution time in last period in jiffies, equals utime + stime - oldutime - oldstime
 	int coreId; // this thread can run on which core
+	char name[18]; // thread name
 } THREADATTR;
 
 void initialize_threads(void);
 void initialize_thread(int pid);
 void destroy_thread(int pid);
 void calculate_utilization(void);
+float execTimeToUtil(int execTime);
 void allocation(int pid);
 void prioritize(vector *importanceChangeThrVec);
 #endif // __THREAD_H__

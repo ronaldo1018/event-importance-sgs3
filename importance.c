@@ -19,8 +19,8 @@
  * @file importance.c
  * @brief control thread importance
  * @author Po-Hsien Tseng <steve13814@gmail.com>
- * @version 20130317
- * @date 2013-03-17
+ * @version 20130409
+ * @date 2013-04-09
  */
 #include "importance.h"
 #include "config.h"
@@ -91,7 +91,7 @@ THREADATTR threadSet[PID_MAX];
 /**
  * @brief data structure to store cpu core information
  */
-COREATTR coreSet[NUM_OF_CORE];
+COREATTR coreSet[CONFIG_NUM_OF_CORE];
 
 /**
  * @brief the last pid that is aging
@@ -99,10 +99,14 @@ COREATTR coreSet[NUM_OF_CORE];
 int lastAgingPid = 0;
 
 /**
+ * @brief elapse time since last utilization calculation
+ */
+float elapseTime;
+
+/**
  * @brief current cpu frequency
  */
 int curFreq;
-
 
 /**
  * @brief maximum cpu frequency available
@@ -139,6 +143,10 @@ static void aging(void);
  */
 int main(int argc, char **argv)
 {
+	if(DEBUG_INFO || DEBUG_DVFS_INFO)
+	{
+		initialize_debug();
+	}
 	prioritize_self(); // change nice of this process to highest
 	initialize_vectors(); // must be initialize first because other initialize function might use vectors
 	initialize_cores(); // must precede initialize_threads() because we need data structure in initialize_cores() to count utilization
@@ -190,9 +198,15 @@ void change_importance(int pid, enum IMPORTANCE_VALUE importance, bool firstAssi
 	{
 		coreSet[coreId].sumOfImportance += importance - threadSet[pid].importance;
 		if(threadSet[pid].importance == IMPORTANCE_LOW && importance != IMPORTANCE_LOW)
-			coreSet[coreId].midUtil += threadSet[pid].util;
+		{
+			coreSet[coreId].midExecTime += threadSet[pid].execTime;
+			coreSet[coreId].midUtil = execTimeToUtil(coreSet[coreId].midExecTime);
+		}
 		else if(threadSet[pid].importance != IMPORTANCE_LOW && importance == IMPORTANCE_LOW)
-			coreSet[coreId].midUtil -= threadSet[pid].util;
+		{
+			coreSet[coreId].midExecTime -= threadSet[pid].execTime;
+			coreSet[coreId].midUtil = execTimeToUtil(coreSet[coreId].midExecTime);
+		}
 	}
 	threadSet[pid].importance = importance;
 	vector_push(importanceChangeThrVec, &pid);
@@ -279,9 +293,20 @@ static int handle_proc_event()
 			return -1;
 		}
 
-		vector_remove_all(importanceChangeThrVec);
-		produce_importance(&cnprocMsg); // modify event affected threads
-		do_action(&cnprocMsg); // do the 6 component
+		switch(cnprocMsg.proc_ev.what)
+		{
+			case PROC_EVENT_NONE:
+			case PROC_EVENT_EXEC:
+			case PROC_EVENT_UID:
+			case PROC_EVENT_GID:
+			case PROC_EVENT_SID:
+				break; // ignore these events
+			default:
+				vector_remove_all(importanceChangeThrVec);
+				produce_importance(&cnprocMsg); // modify event affected threads
+				do_action(&cnprocMsg); // do the 6 component
+				break;
+		}
 	}
 	return 0;
 }
@@ -322,8 +347,6 @@ static void produce_importance(NLCN_CNPROC_MSG *cnprocMsg)
 
 	switch(cnprocMsg->proc_ev.what)
 	{
-		case PROC_EVENT_NONE: // subscribe proc event succeed 
-			break;
 		case PROC_EVENT_FORK:
 			INFO(("[fork]\n"));
 			appearedThrPid = cnprocMsg->proc_ev.event_data.fork.child_pid;
@@ -392,15 +415,9 @@ static void produce_importance(NLCN_CNPROC_MSG *cnprocMsg)
 				case 0: // utilization sampling
 					INFO(("timer: timer0 tick\n"));
 
-					// early DVFS if needed
-					if(check_core_util_up())
-					{
-						setFreq(maxFreq);
-					}
-
 					// check if activity change
 					check_activity_counter++;
-					if(check_activity_counter >= CHECK_ACTIVITY_TIME)
+					if(check_activity_counter >= CONFIG_CHECK_ACTIVITY_TIME)
 					{
 						vector_remove_all(becomeBGThrVec);
 						vector_remove_all(becomeFGThrVec);
@@ -456,10 +473,11 @@ static void produce_importance(NLCN_CNPROC_MSG *cnprocMsg)
 		case TOUCH_EVENT:
 			INFO(("[touch]\n"));
 			touchIsOn = true;
+			setFreq(maxFreq); // early set frequency to highest
 			importance_mid_to_high();
 			break;
-		default: // ignore other events
-			INFO(("ignored event\n"));
+		default:
+			INFO(("unknown event!\n"));
 			break;
 	}
 }
@@ -477,8 +495,6 @@ static void do_action(NLCN_CNPROC_MSG *cnprocMsg)
 
 	switch(cnprocMsg->proc_ev.what)
 	{
-		case PROC_EVENT_NONE: // subscribe proc event succeed 
-			break;
 		case PROC_EVENT_FORK:
 			appearedThrPid = cnprocMsg->proc_ev.event_data.fork.child_pid;
 			allocation(appearedThrPid);
@@ -539,8 +555,8 @@ static void do_action(NLCN_CNPROC_MSG *cnprocMsg)
 				DVFS();
 			}
 			break;
-		default: // ignore other events
-			INFO(("ignored event\n"));
+		default:
+			INFO(("unknown event!\n"));
 			break;
 	}
 }
@@ -654,7 +670,7 @@ static void cur_activity_importance_to_mid(void)
 	for(i = 0; i < length; i++)
 	{
 		vector_get(curActivityThrVec, i, &pid);
-		printf("vector_get %d\n", pid);
+		INFO(("vector_get %d\n", pid));
 		change_importance(pid, IMPORTANCE_MID, false);
 	}
 }

@@ -19,8 +19,8 @@
  * @file thread.c
  * @brief control threads
  * @author Po-Hsien Tseng <steve13814@gmail.com>
- * @version 20130317
- * @date 2013-03-17
+ * @version 20130409
+ * @date 2013-04-09
  */
 #include "thread.h"
 #include "config.h"
@@ -43,6 +43,7 @@
 extern THREADATTR threadSet[];
 extern COREATTR coreSet[];
 extern vector *curActivityThrVec;
+extern float elapseTime;
 extern int curFreq;
 
 // variables or functions only used in this file
@@ -73,9 +74,9 @@ void initialize_threads(void)
 				pid = atoi(de->d_name);
 				initialize_thread(pid);
 				if(threadSet[pid].isSysThr)
-					change_importance(pid, IMPORTANCE_MID, true);
+					change_importance(pid, IMPORTANCE_MID, true); // set to mid because we can get utilization of this thread for dvfs, dpm, ....
 				else
-					change_importance(pid, IMPORTANCE_LOW, true); // set to mid because we can get utilization of this thread for dvfs, dpm...., but priority of this thread will not be changed
+					change_importance(pid, IMPORTANCE_LOW, true);
 			}
 		}
 		closedir(d);
@@ -116,13 +117,17 @@ void initialize_thread(int pid)
 
 	// get original nice value and on which core
 	sprintf(buff, "/proc/%d/stat", pid);
-	parseInt2(buff, 18, &threadSet[pid].originalNice, 38, &threadSet[pid].coreId, &failbit);
+	
+	parseString(buff, 1, threadSet[pid].name, &failbit);
+	//parseInt2(buff, 18, &threadSet[pid].originalNice, 38, &threadSet[pid].coreId, &failbit);
 	// get utime and stime
 	parseInt2(buff, 13, &threadSet[pid].oldutime, 14, &threadSet[pid].oldstime, &failbit);
-	INFO(("initialize thread %d: s:%s n:%d c:%d ut:%d st:%d\n", pid, threadSet[pid].isSysThr?"s":"u", threadSet[pid].originalNice, threadSet[pid].coreId, threadSet[pid].oldutime, threadSet[pid].oldstime));
+	INFO(("initialize thread %d: s:%s c:%d ut:%d st:%d\n", pid, threadSet[pid].isSysThr?"s":"u", threadSet[pid].coreId, threadSet[pid].oldutime, threadSet[pid].oldstime));
 	if(failbit) return; // thread disappeared..
 	threadSet[pid].isUsed = 1;
-	assign_core(pid, threadSet[pid].coreId, true);
+	//assign_core(pid, threadSet[pid].coreId, true);
+	assign_core(pid, 0, true);
+	threadSet[pid].coreId = 0;
 }
 
 /**
@@ -137,9 +142,13 @@ void destroy_thread(int pid)
 
 	coreId = threadSet[pid].coreId;
 	threadSet[pid].isUsed = 0;
-	coreSet[coreId].util -= threadSet[pid].util;
+	coreSet[coreId].execTime -= threadSet[pid].execTime;
+	coreSet[coreId].util = execTimeToUtil(coreSet[coreId].execTime);
 	if(threadSet[pid].importance >= IMPORTANCE_MID)
-		coreSet[coreId].midUtil -= threadSet[pid].util;
+	{
+		coreSet[coreId].midExecTime -= threadSet[pid].execTime;
+		coreSet[coreId].midUtil = execTimeToUtil(coreSet[coreId].midExecTime);
+	}
 	coreSet[coreId].sumOfImportance -= threadSet[pid].importance;
 	coreSet[coreId].numOfThreads--;
 }
@@ -152,18 +161,22 @@ void calculate_utilization(void)
 	int i;
 	DIR *d;
 	struct dirent *de;
+	FILE *fp;
 	bool failbit;
 	int pid;
+	int coreId;
 	char buff[BUFF_SIZE];
 	struct timeval t;
 	struct timezone timez;
-	float elapseTime;
-	float newUtil;
+	unsigned long long cpuinfo[10], busy, nice_busy, idle, busydiv, nice_busydiv, idlediv;
+	int newExecTime;
 	DVFS_INFO(("calculate utilization\n"));
-	
+
 	// clear coreSet util
-	for(i = 0; i < NUM_OF_CORE; i++)
+	for(i = 0; i < CONFIG_NUM_OF_CORE; i++)
 	{
+		coreSet[i].execTime = 0;
+		coreSet[i].midExecTime = 0;
 		coreSet[i].util = 0;
 		coreSet[i].midUtil = 0;
 	}
@@ -174,40 +187,101 @@ void calculate_utilization(void)
 	DVFS_INFO(("elapseTime = %f\n", elapseTime));
 	oldTime.tv_sec = t.tv_sec;
 	oldTime.tv_usec = t.tv_usec;
-	
-	if((d = opendir("/proc")) != NULL)
-	{
-		while((de = readdir(d)) != 0)
-		{
-			if(isdigit(de->d_name[0]))
-			{
-				pid = atoi(de->d_name);
-				sprintf(buff, "/proc/%d/stat", pid);
-				parseInt2(buff, 13, &threadSet[pid].utime, 14, &threadSet[pid].stime, &failbit);
-				if(failbit)
-				{
-					// thread disappeared
-					continue;
-				}
 
-				// notice: curFreq may change between two utilization samplings, but we use last value to estimate for simplicity
-				newUtil = (float)(threadSet[pid].utime - threadSet[pid].oldutime + threadSet[pid].stime - threadSet[pid].oldstime) * UTILIZATION_PROMOTION_RATIO / CONFIG_HZ / elapseTime * curFreq;
-				if(newUtil != 0)
-					DVFS_INFO(("pid %d has new util %f\n", pid, newUtil));
-				coreSet[threadSet[pid].coreId].util += newUtil;
-				if(threadSet[pid].importance >= IMPORTANCE_MID)
-					coreSet[threadSet[pid].coreId].midUtil += newUtil;
-				threadSet[pid].util = newUtil;
-				threadSet[pid].oldutime = threadSet[pid].utime;
-				threadSet[pid].oldstime = threadSet[pid].stime;
+	if(CONFIG_FAST_MID_UTIL_ENABLED)
+	{
+		INFO(("fast mid util enabled\n"));
+		fp = fopen(CPUINFO_PATH, "r");
+		if(fp)
+		{
+			fgets(buff, BUFF_SIZE, fp); // ignore first line
+			while(fgets(buff, BUFF_SIZE, fp))
+			{
+				if(strstr(buff, "cpu"))
+				{
+					sscanf(buff, "cpu%d %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu", &coreId, &cpuinfo[0], &cpuinfo[1], &cpuinfo[2], &cpuinfo[3], &cpuinfo[4], &cpuinfo[5], &cpuinfo[6], &cpuinfo[7], &cpuinfo[8], &cpuinfo[9]); // time(unit: jiffies) spent of all cpus for: user nice system idle iowait irq softirq stead guest
+					busy = cpuinfo[0] + cpuinfo[1] + cpuinfo[2] + cpuinfo[4] + cpuinfo[5] + cpuinfo[6] + cpuinfo[7] + cpuinfo[8] + cpuinfo[9];
+					busydiv = busy - coreSet[coreId].busy;
+					nice_busy = cpuinfo[1];
+					nice_busydiv = nice_busy - coreSet[coreId].nice_busy;
+					idle = cpuinfo[3];
+					idlediv = idle - coreSet[coreId].idle;
+					coreSet[coreId].util = (float)(busydiv) / (busydiv + idlediv) * curFreq;
+					coreSet[coreId].midUtil = (float)(busydiv - nice_busydiv) / (busydiv + idlediv) * curFreq;
+					INFO(("core %d: util %f midUtil %f\n", coreId, coreSet[coreId].util, coreSet[coreId].midUtil));
+					coreSet[coreId].busy = busy;
+					coreSet[coreId].nice_busy = nice_busy;
+					coreSet[coreId].idle = idle;
+				}
+				else // string 'cpu' is not found
+				{
+					break;
+				}
 			}
+			fclose(fp);
 		}
-		closedir(d);
 	}
 	else
 	{
-		fprintf(stderr, "cannot open directory /proc\n");
+		// update each thread's execution time
+		if((d = opendir("/proc")) != NULL)
+		{
+			while((de = readdir(d)) != 0)
+			{
+				if(isdigit(de->d_name[0]))
+				{
+					pid = atoi(de->d_name);
+					sprintf(buff, "/proc/%d/stat", pid);
+					parseInt2(buff, 13, &threadSet[pid].utime, 14, &threadSet[pid].stime, &failbit);
+					if(failbit)
+					{
+						// thread disappeared
+						// we need to add some compensation time to the core this thread was running on to precisely estimate running time
+						coreId = threadSet[pid].coreId;
+						coreSet[coreId].execTime++;
+						if(threadSet[pid].importance >= IMPORTANCE_MID)
+						{
+							coreSet[coreId].midExecTime++;
+						}
+						continue;
+					}
+
+					// notice: curFreq may change between two utilization samplings, but we use last value to estimate for simplicity
+					newExecTime = threadSet[pid].utime - threadSet[pid].oldutime + threadSet[pid].stime - threadSet[pid].oldstime;
+					if(newExecTime != 0)
+						DVFS_INFO(("pid %d in core %d has exec time %d\n", pid, threadSet[pid].coreId, threadSet[pid].utime - threadSet[pid].oldutime + threadSet[pid].stime - threadSet[pid].oldstime));
+					coreSet[threadSet[pid].coreId].execTime += newExecTime;
+					if(threadSet[pid].importance >= IMPORTANCE_MID)
+						coreSet[threadSet[pid].coreId].midExecTime += newExecTime;
+					threadSet[pid].execTime = newExecTime;
+					threadSet[pid].oldutime = threadSet[pid].utime;
+					threadSet[pid].oldstime = threadSet[pid].stime;
+				}
+			}
+			closedir(d);
+
+			// update core's execution time
+			for(i = 0; i < CONFIG_NUM_OF_CORE; i++)
+			{
+				coreSet[i].util = execTimeToUtil(coreSet[i].execTime);
+				coreSet[i].midUtil = execTimeToUtil(coreSet[i].midExecTime);
+			}
+		}
+		else
+		{
+			fprintf(stderr, "cannot open directory /proc\n");
+		}
 	}
+}
+
+/**
+ * @brief execTimeToUtil convert a thread's execution time to utilization based on current elaspe time and frequency
+ *
+ * @param execTime
+ */
+float execTimeToUtil(int execTime)
+{
+	return (float)execTime / CONFIG_CORE_UPDATE_TIME / elapseTime * curFreq;
 }
 
 /**
@@ -225,7 +299,7 @@ void allocation(int pid)
 	minCoreId = 0;
 	if(threadSet[pid].importance >= IMPORTANCE_MID)
 	{
-		for(i = 1; i < NUM_OF_CORE; i++)
+		for(i = 1; i < CONFIG_NUM_OF_CORE; i++)
 		{
 			if(coreSet[i].sumOfImportance < coreSet[minCoreId].sumOfImportance)
 			{
@@ -233,11 +307,11 @@ void allocation(int pid)
 			}
 		}
 	}
-	else
+	else // importance = low
 	{
-		for(i = 1; i < NUM_OF_CORE; i++)
+		for(i = 1; i < CONFIG_NUM_OF_CORE; i++)
 		{
-			if(coreSet[i].util < coreSet[minCoreId].util)
+			if(coreSet[i].execTime < coreSet[minCoreId].execTime)
 			{
 				minCoreId = i;
 			}
@@ -267,13 +341,13 @@ void prioritize(vector *importanceChangeThrVec)
 		switch(threadSet[pid].importance)
 		{
 			case IMPORTANCE_LOW:
-				ret = setpriority(PRIO_PROCESS, pid, 10);
+				ret = setpriority(PRIO_PROCESS, pid, CONFIG_NICE_LOW);
 				break;
 			case IMPORTANCE_MID:
-				ret = setpriority(PRIO_PROCESS, pid, 0);
+				ret = setpriority(PRIO_PROCESS, pid, CONFIG_NICE_MID);
 				break;
 			case IMPORTANCE_HIGH:
-				ret = setpriority(PRIO_PROCESS, pid, -10);
+				ret = setpriority(PRIO_PROCESS, pid, CONFIG_NICE_HIGH);
 				break;
 			default:
 				fprintf(stderr, "unknown importance %d\n", threadSet[pid].importance);
@@ -282,7 +356,7 @@ void prioritize(vector *importanceChangeThrVec)
 				break;
 		}
 		if(ret)
-			fprintf(stderr, "thread %d disappeared...\n", pid);
+			INFO(("thread %d disappeared...\n", pid));
 		else
 			INFO(("pid = %d, nice = %d\n", pid, (int)threadSet[pid].importance * -10));
 	}

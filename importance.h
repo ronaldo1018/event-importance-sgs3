@@ -19,8 +19,8 @@
  * @file importance.h
  * @brief header file that control thread importance
  * @author Po-Hsien Tseng <steve13814@gmail.com>
- * @version 20130317
- * @date 2013-03-17
+ * @version 20130409
+ * @date 2013-04-09
  */
 #ifndef __IMPORTANCE_H__
 #define __IMPORTANCE_H__

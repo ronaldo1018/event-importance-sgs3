@@ -19,8 +19,8 @@
  * @file netlink.c
  * @brief control netlink socket
  * @author Po-Hsien Tseng <steve13814@gmail.com>
- * @version 20130317
- * @date 2013-03-17
+ * @version 20130409
+ * @date 2013-04-09
  */
 #include "netlink.h" // already include netlink.h, connector.h, cn_proc.h
 #include "debug.h"
