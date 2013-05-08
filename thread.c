@@ -63,8 +63,6 @@ void initialize_threads(void)
 	int pid;
 	INFO(("initialize threads\n"));
 
-	memset(threadSet, 0, sizeof(THREADATTR) * PID_MAX);
-
 	if((d = opendir("/proc")) != NULL)
 	{
 		while((de = readdir(d)) != 0)
@@ -118,7 +116,7 @@ void initialize_thread(int pid)
 	// get original nice value and on which core
 	sprintf(buff, "/proc/%d/stat", pid);
 	
-	parseString(buff, 1, threadSet[pid].name, &failbit);
+	//parseString(buff, 1, threadSet[pid].name, &failbit);
 	//parseInt2(buff, 18, &threadSet[pid].originalNice, 38, &threadSet[pid].coreId, &failbit);
 	// get utime and stime
 	parseInt2(buff, 13, &threadSet[pid].oldutime, 14, &threadSet[pid].oldstime, &failbit);
@@ -142,13 +140,6 @@ void destroy_thread(int pid)
 
 	coreId = threadSet[pid].coreId;
 	threadSet[pid].isUsed = 0;
-	coreSet[coreId].execTime -= threadSet[pid].execTime;
-	coreSet[coreId].util = execTimeToUtil(coreSet[coreId].execTime);
-	if(threadSet[pid].importance >= IMPORTANCE_MID)
-	{
-		coreSet[coreId].midExecTime -= threadSet[pid].execTime;
-		coreSet[coreId].midUtil = execTimeToUtil(coreSet[coreId].midExecTime);
-	}
 	coreSet[coreId].sumOfImportance -= threadSet[pid].importance;
 	coreSet[coreId].numOfThreads--;
 }
@@ -168,7 +159,7 @@ void calculate_utilization(void)
 	char buff[BUFF_SIZE];
 	struct timeval t;
 	struct timezone timez;
-	unsigned long long cpuinfo[10], busy, nice_busy, idle, busydiv, nice_busydiv, idlediv;
+	unsigned long long cpuinfo[10], busy, nice_busy, idle, busysub, nice_busysub, idlesub;
 	int newExecTime;
 	DVFS_INFO(("calculate utilization\n"));
 
@@ -201,13 +192,13 @@ void calculate_utilization(void)
 				{
 					sscanf(buff, "cpu%d %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu", &coreId, &cpuinfo[0], &cpuinfo[1], &cpuinfo[2], &cpuinfo[3], &cpuinfo[4], &cpuinfo[5], &cpuinfo[6], &cpuinfo[7], &cpuinfo[8], &cpuinfo[9]); // time(unit: jiffies) spent of all cpus for: user nice system idle iowait irq softirq stead guest
 					busy = cpuinfo[0] + cpuinfo[1] + cpuinfo[2] + cpuinfo[4] + cpuinfo[5] + cpuinfo[6] + cpuinfo[7] + cpuinfo[8] + cpuinfo[9];
-					busydiv = busy - coreSet[coreId].busy;
+					busysub = busy - coreSet[coreId].busy;
 					nice_busy = cpuinfo[1];
-					nice_busydiv = nice_busy - coreSet[coreId].nice_busy;
+					nice_busysub = nice_busy - coreSet[coreId].nice_busy;
 					idle = cpuinfo[3];
-					idlediv = idle - coreSet[coreId].idle;
-					coreSet[coreId].util = (float)(busydiv) / (busydiv + idlediv) * curFreq;
-					coreSet[coreId].midUtil = (float)(busydiv - nice_busydiv) / (busydiv + idlediv) * curFreq;
+					idlesub = idle - coreSet[coreId].idle;
+					coreSet[coreId].util = (float)(busysub) / (busysub + idlesub) * curFreq;
+					coreSet[coreId].midUtil = (float)(busysub - nice_busysub) / (busysub + idlesub) * curFreq;
 					INFO(("core %d: util %f midUtil %f\n", coreId, coreSet[coreId].util, coreSet[coreId].midUtil));
 					coreSet[coreId].busy = busy;
 					coreSet[coreId].nice_busy = nice_busy;
@@ -358,6 +349,6 @@ void prioritize(vector *importanceChangeThrVec)
 		if(ret)
 			INFO(("thread %d disappeared...\n", pid));
 		else
-			INFO(("pid = %d, nice = %d\n", pid, (int)threadSet[pid].importance * -10));
+			INFO(("pid = %d, nice = %d\n", pid, threadSet[pid].importance == IMPORTANCE_LOW? CONFIG_NICE_LOW: threadSet[pid].importance == IMPORTANCE_MID? CONFIG_NICE_MID: CONFIG_NICE_HIGH));
 	}
 }

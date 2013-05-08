@@ -29,7 +29,6 @@
 #include "common.h"
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdbool.h>
 
 extern bool agingIsOn;
 
@@ -114,7 +113,6 @@ void destroy_timer(void)
 	else
 	{
 		fprintf(stderr, "cannot stop timer0\n");
-		perror("timer0");
 	}
 
 	fp = fopen(TIMER1_ENABLE_PATH, "w");
@@ -126,7 +124,6 @@ void destroy_timer(void)
 	else
 	{
 		fprintf(stderr, "cannot stop timer1\n");
-		perror("timer1");
 	}
 
 	fp = fopen(TIMER2_ENABLE_PATH, "w");
@@ -138,19 +135,6 @@ void destroy_timer(void)
 	else
 	{
 		fprintf(stderr, "cannot stop timer2\n");
-		perror("timer2");
-	}
-
-	fp = fopen(TIMER3_ENABLE_PATH, "w");
-	if(fp)
-	{
-		fprintf(fp, "0\n");
-		fclose(fp);
-	}
-	else
-	{
-		fprintf(stderr, "cannot stop timer3\n");
-		perror("timer3");
 	}
 }
 
@@ -173,34 +157,15 @@ void turn_on_sampling_timer(void)
 	}
 }
 
-void turn_on_aging_timer(void)
+void switch_aging_timer(bool on)
 {
 	FILE *fp;
-	INFO(("turn on aging timer\n"));
+	INFO(("turn %s aging timer\n", on?"on":"off"));
 
 	fp = fopen(TIMER1_ENABLE_PATH, "w");
 	if(fp)
 	{
-		fprintf(fp, "1\n");
-		fclose(fp);
-	}
-	else
-	{
-		fprintf(stderr, "cannot setup timer1\n");
-		destruction();
-		exit(EXIT_FAILURE);
-	}
-}
-
-void turn_off_aging_timer(void)
-{
-	FILE *fp;
-	INFO(("turn off aging timer\n"));
-
-	fp = fopen(TIMER1_ENABLE_PATH, "w");
-	if(fp)
-	{
-		fprintf(fp, "0\n");
+		fprintf(fp, "%d\n", on?1:0);
 		fclose(fp);
 	}
 	else
@@ -212,17 +177,18 @@ void turn_off_aging_timer(void)
 }
 
 /**
- * @brief turn_on_temp_mid_timer turn on temp mid timer for newly appeared thread that temporarily becomes mid
+ * @brief turn_on_temp_high_timer turn on temp high timer for foreground threads that temporarily become high
  */
-void turn_on_temp_mid_timer(void)
+void turn_on_temp_high_timer(void)
 {
 	FILE *fp;
-	INFO(("turn on temp mid timer\n"));
+	INFO(("turn on temp high timer\n"));
 
+	// initialize first timer for utilization sampling
 	fp = fopen(TIMER2_TIME_PATH, "w");
 	if(fp)
 	{
-		fprintf(fp, "%d\n", CONFIG_TMP_MID_TIME);
+		fprintf(fp, "%d\n", CONFIG_TMP_HIGH_TIME);
 		fclose(fp);
 	}
 	else
@@ -240,41 +206,6 @@ void turn_on_temp_mid_timer(void)
 	else
 	{
 		fprintf(stderr, "cannot setup timer2\n");
-		destruction();
-		exit(EXIT_FAILURE);
-	}
-}
-
-/**
- * @brief turn_on_temp_high_timer turn on temp high timer for foreground threads that temporarily become high
- */
-void turn_on_temp_high_timer(void)
-{
-	FILE *fp;
-	INFO(("turn on temp high timer\n"));
-
-	// initialize first timer for utilization sampling
-	fp = fopen(TIMER3_TIME_PATH, "w");
-	if(fp)
-	{
-		fprintf(fp, "%d\n", CONFIG_TMP_HIGH_TIME);
-		fclose(fp);
-	}
-	else
-	{
-		fprintf(stderr, "cannot setup timer3\n");
-		destruction();
-		exit(EXIT_FAILURE);
-	}
-	fp = fopen(TIMER3_ENABLE_PATH, "w");
-	if(fp)
-	{
-		fprintf(fp, "1\n");
-		fclose(fp);
-	}
-	else
-	{
-		fprintf(stderr, "cannot setup timer3\n");
 		destruction();
 		exit(EXIT_FAILURE);
 	}

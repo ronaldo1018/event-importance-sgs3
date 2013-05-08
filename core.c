@@ -73,21 +73,6 @@ static int sumProcRunning = 0;
 static int avgProcRunning = 0;
 
 /**
- * @brief record history utilization for coarse-grained core-level dvfs
- */
-//static float utilHistory[CONFIG_NUM_OF_HISTORY_ENTRIES];
-
-/**
- * @brief record last entry index in utilHistroy array
- */
-//static int utilHistoryIndex = 0;
-
-/**
- * @brief average value of utilization history
- */
-//static float avgUtil = 0;
-
-/**
  * @brief record history mid utilization for fine-grained thread-level dvfs
  */
 static float midUtilHistory[CONFIG_NUM_OF_HISTORY_ENTRIES];
@@ -115,7 +100,7 @@ static int Thres[3] = {CONFIG_THRESHOLD2, CONFIG_THRESHOLD3, CONFIG_THRESHOLD4};
 // frequency
 static void getFrequencyTable(void);
 static int getCurFreq(void);
-static int getProperFreq(float util);
+static int getProperFreq(float util, bool fastUp);
 static void changeGovernorToUserspace(void);
 // process
 static int getNumProcessRunning(void);
@@ -141,8 +126,6 @@ void initialize_cores(void)
 	FILE *fp;
 	INFO(("initialize cores\n"));
 
-	memset(coreSet, 0, sizeof(COREATTR) * CONFIG_NUM_OF_CORE);
-	
 	// core
 	for(i = 0; i < CONFIG_NUM_OF_CORE; i++)
 	{
@@ -176,21 +159,6 @@ void initialize_cores(void)
 		fclose(fp);
 	}
 	
-	/* debug only */
-	//for(i = 1; i < CONFIG_NUM_OF_CORE; i++)
-	//{
-	//	// open all cores temporary to know each core's busy and idle
-	//	sprintf(buff, "/sys/devices/system/cpu/cpu%d/online", i);
-	//	fp = fopen(buff, "w");
-	//	if(fp)
-	//	{
-	//		fprintf(fp, "0\n");
-	//		coreSet[i].online = false;
-	//		fclose(fp);
-	//	}
-	//}
-	//numOfCoresOnline = 1;
-
 	// frequency
 	getFrequencyTable();
 	if(CONFIG_TURN_ON_DVFS)
@@ -204,46 +172,6 @@ void initialize_cores(void)
 		procRunningHistory[i] = 1;
 	sumProcRunning = CONFIG_NUM_OF_PROCESS_RUNNING_HISTORY_ENTRIES;
 	memset(midUtilHistory, 0, sizeof(float) * CONFIG_NUM_OF_HISTORY_ENTRIES);
-}
-
-/**
- * @brief check_core_util_up if any core's utilization is above a ratio, then need change frequency immediately
- */
-bool check_core_util_up(void)
-{
-	int coreId;
-	char buff[BUFF_SIZE];
-	unsigned long long cpuinfo[10], busy, idle;
-	float util;
-	FILE *fp;
-
-	fp = fopen(CPUINFO_PATH, "r");
-	if(fp)
-	{
-		fgets(buff, BUFF_SIZE, fp); // ignore first line
-		while(fgets(buff, BUFF_SIZE, fp))
-		{
-			if(strstr(buff, "cpu"))
-			{
-				sscanf(buff, "cpu%d %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu", &coreId, &cpuinfo[0], &cpuinfo[1], &cpuinfo[2], &cpuinfo[3], &cpuinfo[4], &cpuinfo[5], &cpuinfo[6], &cpuinfo[7], &cpuinfo[8], &cpuinfo[9]); // time(unit: jiffies) spent of all cpus for: user nice system idle iowait irq softirq stead guest
-				busy = cpuinfo[0] + cpuinfo[1] + cpuinfo[2] + cpuinfo[4] + cpuinfo[5] + cpuinfo[6] + cpuinfo[7] + cpuinfo[8] + cpuinfo[9] - coreSet[coreId].busy;
-				idle = cpuinfo[3] - coreSet[coreId].idle;
-				util = (float)busy / (busy + idle);
-				if(util > CONFIG_SCALE_UP_RATIO)
-				{
-					INFO(("***************************need scale up, early DVFS*************************************\n"));
-					fclose(fp);
-					return true;
-				}
-			}
-			else
-			{
-				break;
-			}
-		}
-		fclose(fp);
-	}
-	return false;
 }
 
 /**
@@ -365,19 +293,12 @@ void assign_core(int pid, int coreId, bool firstAssign)
 }
 
 /**
- * @brief core_dvfs coarse-grained core-level dvfs for pre-assign enough frequency for later calculation
- */
-void core_dvfs(void)
-{
-	// not yet implemented
-}
-
-/**
  * @brief DVFS tune cpu frequency to specific level based on utilization of mid importance thread
  */
 void DVFS(void)
 {
 	int i, maxCoreId;
+	bool fastUp = false;
 	if(!CONFIG_TURN_ON_DVFS)
 		return;
 	INFO(("DVFS\n"));
@@ -398,12 +319,19 @@ void DVFS(void)
 				maxCoreId = i;
 			}
 		}
+
+		if(coreSet[maxCoreId].midUtil > midUtilHistory[midUtilHistoryIndex]
+			&& midUtilHistory[midUtilHistoryIndex] > midUtilHistory[(midUtilHistoryIndex - 1) % CONFIG_NUM_OF_HISTORY_ENTRIES])
+		{
+			fastUp = true;
+		}
+
 		// record utilization in history table
 		midUtilHistoryIndex = (midUtilHistoryIndex + 1) % CONFIG_NUM_OF_HISTORY_ENTRIES;
 		avgMidUtil = avgMidUtil + (coreSet[maxCoreId].midUtil - midUtilHistory[midUtilHistoryIndex]) / CONFIG_NUM_OF_HISTORY_ENTRIES;
 		midUtilHistory[midUtilHistoryIndex] = coreSet[maxCoreId].midUtil;
 
-		curFreq = getProperFreq(avgMidUtil);
+		curFreq = getProperFreq(avgMidUtil, fastUp);
 		DVFS_INFO(("max mid util = %f\n", coreSet[maxCoreId].midUtil));
 		DVFS_INFO(("set frequency to %d\n", curFreq));
 		setFreq(curFreq);
@@ -552,19 +480,41 @@ static int getCurFreq(void)
  *
  * @return frequency level to use
  */
-static int getProperFreq(float util)
+static int getProperFreq(float util, bool fastUp)
 {
 	int candidateFreqLevel = 0;
+	static int lastFreqLevel = 0;
 
-	for(candidateFreqLevel = 0; candidateFreqLevel < numOfFreq - 1; candidateFreqLevel++)
+	if(fastUp)
 	{
-		if(freqTable[candidateFreqLevel] > util)
+		for(candidateFreqLevel = lastFreqLevel; candidateFreqLevel < numOfFreq - 1; candidateFreqLevel++)
 		{
-			if(freqTable[candidateFreqLevel] * CONFIG_SCALE_UP_RATIO < util)
-				candidateFreqLevel++;
-			break;
+			if(freqTable[candidateFreqLevel] > util)
+			{
+				candidateFreqLevel += candidateFreqLevel - lastFreqLevel;
+				if(candidateFreqLevel >= numOfFreq)
+					candidateFreqLevel = numOfFreq - 1;
+				break;
+			}
 		}
 	}
+	else
+	{
+		for(candidateFreqLevel = 0; candidateFreqLevel < numOfFreq - 1; candidateFreqLevel++)
+		{
+			if(freqTable[candidateFreqLevel] > util)
+			{
+				if(midUtilHistory[midUtilHistoryIndex] > midUtilHistory[(midUtilHistoryIndex - 1) % CONFIG_NUM_OF_HISTORY_ENTRIES]) // scale up
+				{
+					if(freqTable[candidateFreqLevel] * CONFIG_SCALE_UP_RATIO < util)
+						candidateFreqLevel++;
+				}
+				break;
+			}
+		}
+	}
+
+	lastFreqLevel = candidateFreqLevel;
 	return freqTable[candidateFreqLevel];
 }
 
@@ -743,7 +693,7 @@ static void balanceCoreImp(int minCoreId, int maxCoreId)
 	pid = 1;
 	while(coreSet[minCoreId].sumOfImportance < avgImportance && pid <= PID_MAX)
 	{
-		if(threadSet[pid].isUsed && threadSet[pid].coreId == maxCoreId && threadSet[pid].importance >= IMPORTANCE_MID)
+		if(threadSet[pid].isUsed && threadSet[pid].coreId == maxCoreId)
 		{
 			assign_core(pid, minCoreId, false);
 		}
@@ -803,7 +753,7 @@ static void balanceCoreUtil(int minCoreId, int maxCoreId)
 	while(coreSet[minCoreId].util < avgUtil && i <= PID_MAX)
 	{
 		// only low importance thread will be moved
-		if(threadSet[i].isUsed && threadSet[i].coreId == maxCoreId && threadSet[i].importance == IMPORTANCE_LOW)
+		if(threadSet[i].isUsed && threadSet[i].coreId == maxCoreId)
 		{
 			assign_core(i, minCoreId, false);
 		}

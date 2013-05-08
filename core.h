@@ -48,10 +48,8 @@ typedef struct _COREATTR
 } COREATTR;
 
 void initialize_cores(void);
-bool check_core_util_up(void);
 void DPM(void);
 void assign_core(int pid, int coreId, bool firstAssign);
-void core_dvfs(void);
 void DVFS(void);
 void setFreq(int freq);
 void migration(void);

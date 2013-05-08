@@ -120,13 +120,11 @@ int maxFreq = 0;
 static volatile bool needExit = false;
 
 static void prioritize_self(void);
-static void initialize_vectors(void);
+static void initialize_data_structures(void);
 static void on_sigint(int unused);
 static int handle_proc_event();
 static void produce_importance(NLCN_CNPROC_MSG *cnprocMsg);
 static void do_action(NLCN_CNPROC_MSG *cnprocMsg);
-static void importance_low_to_mid(int appearedThrPid);
-static void importance_back_to_low(void);
 static void importance_mid_to_high(void);
 static void importance_back_to_mid(void);
 static void cur_activity_importance_to_low(void);
@@ -147,8 +145,8 @@ int main(int argc, char **argv)
 	{
 		initialize_debug();
 	}
+	initialize_data_structures(); // must be initialize first because other initialize function might use
 	prioritize_self(); // change nice of this process to highest
-	initialize_vectors(); // must be initialize first because other initialize function might use vectors
 	initialize_cores(); // must precede initialize_threads() because we need data structure in initialize_cores() to count utilization
 	initialize_touch();
 	initialize_threads(); // must precede initailize_activity() becaise we need data structure in initialize_threads()
@@ -241,8 +239,10 @@ void destruction(void)
  */
 static void prioritize_self(void)
 {
+	int ret;
 	INFO(("prioritize self\n"));
-	int ret = setpriority(PRIO_PROCESS, getpid(), -20); // let this method to have the highest priority
+
+	ret = setpriority(PRIO_PROCESS, getpid(), -20); // let this method to have the highest priority
 	INFO(("pid = %d, ret = %d\n", getpid(), ret));
 	if(ret)
 	{
@@ -314,7 +314,7 @@ static int handle_proc_event()
 /**
  * @brief initialize_vectors initialize vectors for later use
  */
-static void initialize_vectors(void)
+static void initialize_data_structures(void)
 {
 	INFO(("initialize vectors\n"));
 	appearedThrVec = (vector *)malloc(sizeof(vector));
@@ -327,6 +327,12 @@ static void initialize_vectors(void)
 	vector_init(becomeFGThrVec, sizeof(int), 0, NULL);
 	vector_init(curActivityThrVec, sizeof(int), 0, NULL);
 	vector_init(importanceChangeThrVec, sizeof(int), 0, NULL);
+
+	INFO(("initialize THREADATTR\n"));
+	memset(threadSet, 0, sizeof(THREADATTR) * PID_MAX);
+
+	INFO(("initialize COREATTR\n"));
+	memset(coreSet, 0, sizeof(COREATTR) * CONFIG_NUM_OF_CORE);
 }
 
 /**
@@ -352,24 +358,9 @@ static void produce_importance(NLCN_CNPROC_MSG *cnprocMsg)
 			appearedThrPid = cnprocMsg->proc_ev.event_data.fork.child_pid;
 			parentThrPid = cnprocMsg->proc_ev.event_data.fork.parent_pid;
 			initialize_thread(appearedThrPid); // initialize thread must be called here instead of later because we will modify importance
-			if(CONFIG_TURN_ON_START_AT_MID)
-			{
-				if(threadSet[parentThrPid].importance >= IMPORTANCE_MID) // this is a foreground thread
-				{
-					change_importance(appearedThrPid, threadSet[parentThrPid].importance, true);
-					INFO(("appeared pid %d imp %d\n", appearedThrPid, threadSet[appearedThrPid].importance));
-				}
-				else
-				{
-					INFO(("appeared pid %d low to mid\n"));
-					importance_low_to_mid(appearedThrPid);
-				}
-			}
-			else // inherit parent thread's importance
-			{
-				INFO(("appeared pid %d inherits parent %d's imp %d\n", appearedThrPid, parentThrPid, threadSet[parentThrPid].importance));
-				change_importance(appearedThrPid, threadSet[parentThrPid].importance, true);
-			}
+			// inherit parent thread's importance
+			INFO(("appeared pid %d inherits parent %d's imp %d\n", appearedThrPid, parentThrPid, threadSet[parentThrPid].importance));
+			change_importance(appearedThrPid, threadSet[parentThrPid].importance, true);
 			break;
 		case PROC_EVENT_EXIT:
 			INFO(("[exit]\n"));
@@ -389,7 +380,7 @@ static void produce_importance(NLCN_CNPROC_MSG *cnprocMsg)
 					if(CONFIG_TURN_ON_AGING)
 					{
 						agingIsOn = false;
-						turn_off_aging_timer();
+						switch_aging_timer(false);
 					}
 					cur_activity_importance_to_low();
 					break;
@@ -398,7 +389,7 @@ static void produce_importance(NLCN_CNPROC_MSG *cnprocMsg)
 					if(CONFIG_TURN_ON_AGING)
 					{
 						agingIsOn = true;
-						turn_on_aging_timer();
+						switch_aging_timer(true);
 					}
 					cur_activity_importance_to_mid();
 					break;
@@ -430,6 +421,7 @@ static void produce_importance(NLCN_CNPROC_MSG *cnprocMsg)
 								vector_get(becomeBGThrVec, i, &activityChangeThrPid);
 								change_importance(activityChangeThrPid, IMPORTANCE_LOW, false);
 							}
+							
 							length = vector_length(becomeFGThrVec);
 							for(i = 0; i < length; i++)
 							{
@@ -439,6 +431,7 @@ static void produce_importance(NLCN_CNPROC_MSG *cnprocMsg)
 						}
 						check_activity_counter = 0;
 					}
+
 					// check if screen touch if use polling
 					if(CONFIG_POLLING_TOUCH_STATUS)
 					{
@@ -455,12 +448,8 @@ static void produce_importance(NLCN_CNPROC_MSG *cnprocMsg)
 					if(agingIsOn)
 						aging();
 					break;
-				case 2: // temp mid
+				case 2: // temp high
 					INFO(("timer: timer2 tick\n"));
-					importance_back_to_low();
-					break;
-				case 3: // temp high
-					INFO(("timer: timer3 tick\n"));
 					importance_back_to_mid();
 					reenable_touch();
 					touchIsOn = false;
@@ -489,8 +478,8 @@ static void produce_importance(NLCN_CNPROC_MSG *cnprocMsg)
  */
 static void do_action(NLCN_CNPROC_MSG *cnprocMsg)
 {
-	int timer_no;
 	int appearedThrPid;
+	int timer_no;
 	INFO(("do action\n"));
 
 	switch(cnprocMsg->proc_ev.what)
@@ -529,14 +518,7 @@ static void do_action(NLCN_CNPROC_MSG *cnprocMsg)
 						DVFS();
 					}
 					break;
-				case 2: // temp mid
-					if(vector_length(importanceChangeThrVec) != 0)
-					{
-						prioritize(importanceChangeThrVec);
-						DVFS();
-					}
-					break;
-				case 3: // temp high
+				case 2: // temp high
 					if(vector_length(importanceChangeThrVec) != 0)
 					{
 						prioritize(importanceChangeThrVec);
@@ -562,50 +544,10 @@ static void do_action(NLCN_CNPROC_MSG *cnprocMsg)
 }
 
 /**
- * @brief importance_low_to_mid even the newly appeared thread is background thread, it will temporarily become mid importance to know how this new thread performed when become mid importance
- *
- * @param appearedThrPid
- */
-static void importance_low_to_mid(int appearedThrPid)
-{
-	// TODO: conflict of multiple timer in importance_low_to_mid and importance_mid_to_high
-	INFO(("new thread's importance low to mid\n"));
-	vector_push(appearedThrVec, &appearedThrPid);
-	if(vector_length(appearedThrVec) == 1) // vector is empty at first
-	{
-		INFO(("pid %d low to mid\n", appearedThrPid));
-		change_importance(appearedThrPid, IMPORTANCE_MID, true);
-		turn_on_temp_mid_timer();
-	}
-}
-
-/**
- * @brief importance_back_to_low newly appeared background thread which temporarily becomes mid is back to low, let next newly appeared background thread temporarily becomes mid
- */
-static void importance_back_to_low(void)
-{
-	int appearedThrPid, nextAppearedThrPid;
-	INFO(("new thread's importance back to low\n"));
-
-	vector_shift(appearedThrVec, &appearedThrPid);
-	change_importance(appearedThrPid, IMPORTANCE_LOW, false);
-	INFO(("pid %d back to low\n", appearedThrPid));
-
-	if(vector_length(appearedThrVec) > 0)
-	{
-		vector_get(appearedThrVec, 0, &nextAppearedThrPid);
-		INFO(("next pid %d low to mid\n", nextAppearedThrPid));
-		change_importance(nextAppearedThrPid, IMPORTANCE_MID, false);
-		turn_on_temp_mid_timer();
-	}
-}
-
-/**
  * @brief importance_mid_to_high let foreground threads becomes high importance after user makes a touch
  */
 static void importance_mid_to_high(void)
 {
-	// TODO: conflict of multiple timer in importance_low_to_mid and importance_mid_to_high
 	int i, length;
 	int pid;
 

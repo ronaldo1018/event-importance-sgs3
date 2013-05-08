@@ -24,25 +24,21 @@
  */
 #ifndef __TIMER_H__
 #define __TIMER_H__
+#include <stdbool.h>
 #define TIMER0_ENABLE_PATH "/proc/timer_connector/timer0_enable" // util_sample
 #define TIMER1_ENABLE_PATH "/proc/timer_connector/timer1_enable" // aging
-#define TIMER2_ENABLE_PATH "/proc/timer_connector/timer2_enable" // temp_mid
-#define TIMER3_ENABLE_PATH "/proc/timer_connector/timer3_enable" // temp_high
+#define TIMER2_ENABLE_PATH "/proc/timer_connector/timer2_enable" // temp_high
 #define TIMER0_TIME_PATH "/proc/timer_connector/timer0_time"
 #define TIMER1_TIME_PATH "/proc/timer_connector/timer1_time"
 #define TIMER2_TIME_PATH "/proc/timer_connector/timer2_time"
-#define TIMER3_TIME_PATH "/proc/timer_connector/timer3_time"
 /*
- * notice: timer0, 1 is continuous on until disabled
- *         timer2, 3 only turn on once
+ * notice: all timers only turn on once, need manually restart
  */
 
 void initialize_timer(void);
 void destroy_timer(void);
 void turn_on_sampling_timer(void);
-void turn_on_aging_timer(void);
-void turn_off_aging_timer(void);
-void turn_on_temp_mid_timer(void);
+void switch_aging_timer(bool on);
 void turn_on_temp_high_timer(void);
 
 #endif // __TIMER_H__

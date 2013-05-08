@@ -25,7 +25,7 @@
 #ifndef __IMPORTANCE_H__
 #define __IMPORTANCE_H__
 #include <stdbool.h>
-enum IMPORTANCE_VALUE{IMPORTANCE_LOW, IMPORTANCE_MID, IMPORTANCE_HIGH};
+enum IMPORTANCE_VALUE{IMPORTANCE_LOW = 1, IMPORTANCE_MID = 2, IMPORTANCE_HIGH = 3};
 
 void change_importance(int pid, enum IMPORTANCE_VALUE importance, bool firstAssign);
 void destruction(void);
