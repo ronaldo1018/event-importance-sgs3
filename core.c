@@ -97,6 +97,11 @@ static int numOfCoresOnline = 0;
  */
 static int Thres[3] = {CONFIG_THRESHOLD2, CONFIG_THRESHOLD3, CONFIG_THRESHOLD4};
 
+/**
+ * @brief iterate all pid, used when balance core importance or utilization
+ */
+static int pidIterator = 1;
+
 // frequency
 static void getFrequencyTable(void);
 static int getCurFreq(void);
@@ -320,8 +325,8 @@ void DVFS(void)
 			}
 		}
 
-		if(coreSet[maxCoreId].midUtil > midUtilHistory[midUtilHistoryIndex]
-			&& midUtilHistory[midUtilHistoryIndex] > midUtilHistory[(midUtilHistoryIndex - 1) % CONFIG_NUM_OF_HISTORY_ENTRIES])
+		if(coreSet[maxCoreId].midUtil >= midUtilHistory[midUtilHistoryIndex]
+			&& midUtilHistory[midUtilHistoryIndex] >= midUtilHistory[(midUtilHistoryIndex - 1) % CONFIG_NUM_OF_HISTORY_ENTRIES] && curFreq != freqTable[0])
 		{
 			fastUp = true;
 		}
@@ -487,16 +492,9 @@ static int getProperFreq(float util, bool fastUp)
 
 	if(fastUp)
 	{
-		for(candidateFreqLevel = lastFreqLevel; candidateFreqLevel < numOfFreq - 1; candidateFreqLevel++)
-		{
-			if(freqTable[candidateFreqLevel] > util)
-			{
-				candidateFreqLevel += candidateFreqLevel - lastFreqLevel;
-				if(candidateFreqLevel >= numOfFreq)
-					candidateFreqLevel = numOfFreq - 1;
-				break;
-			}
-		}
+		candidateFreqLevel = (lastFreqLevel + numOfFreq - 1) / 2;
+		if(candidateFreqLevel == lastFreqLevel && candidateFreqLevel != numOfFreq - 1)
+			candidateFreqLevel++;
 	}
 	else
 	{
@@ -680,7 +678,7 @@ static int getMaxImpCore(void)
  */
 static void balanceCoreImp(int minCoreId, int maxCoreId)
 {
-	int pid;
+	int startPid;
 	int avgImportance = (coreSet[minCoreId].sumOfImportance + coreSet[maxCoreId].sumOfImportance) / 2;
 	INFO(("balance imp from max core %d to min core %d\n", maxCoreId, minCoreId));
 
@@ -690,14 +688,19 @@ static void balanceCoreImp(int minCoreId, int maxCoreId)
 		return;
 	}
 
-	pid = 1;
-	while(coreSet[minCoreId].sumOfImportance < avgImportance && pid <= PID_MAX)
+	startPid = pidIterator;
+	pidIterator++;
+	if(pidIterator > PID_MAX)
+		pidIterator = 1;
+	while(coreSet[minCoreId].sumOfImportance < avgImportance && pidIterator != startPid)
 	{
-		if(threadSet[pid].isUsed && threadSet[pid].coreId == maxCoreId)
+		if(threadSet[pidIterator].isUsed && threadSet[pidIterator].coreId == maxCoreId)
 		{
-			assign_core(pid, minCoreId, false);
+			assign_core(pidIterator, minCoreId, false);
 		}
-		pid++;
+		pidIterator++;
+		if(pidIterator > PID_MAX)
+			pidIterator = 1;
 	}
 }
 
@@ -739,7 +742,7 @@ static int getMaxUtilCore(void)
  */
 static void balanceCoreUtil(int minCoreId, int maxCoreId)
 {
-	int i;
+	int startPid;
 	int avgUtil = (coreSet[minCoreId].util + coreSet[maxCoreId].util) / 2;
 	INFO(("balance util from max core %d to min core %d\n", maxCoreId, minCoreId));
 
@@ -749,15 +752,19 @@ static void balanceCoreUtil(int minCoreId, int maxCoreId)
 		return;
 	}
 	
-	i = 1;
-	while(coreSet[minCoreId].util < avgUtil && i <= PID_MAX)
+	startPid = pidIterator;
+	pidIterator++;
+	if(pidIterator > PID_MAX)
+		pidIterator = 1;
+	while(coreSet[minCoreId].util < avgUtil && pidIterator != startPid)
 	{
-		// only low importance thread will be moved
-		if(threadSet[i].isUsed && threadSet[i].coreId == maxCoreId)
+		if(threadSet[pidIterator].isUsed && threadSet[pidIterator].coreId == maxCoreId && threadSet[pidIterator].execTime != 0)
 		{
-			assign_core(i, minCoreId, false);
+			assign_core(pidIterator, minCoreId, false);
 		}
-		i++;
+		pidIterator++;
+		if(pidIterator > PID_MAX)
+			pidIterator = 1;
 	}
 }
 

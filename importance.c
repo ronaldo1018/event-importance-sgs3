@@ -366,8 +366,6 @@ static void produce_importance(NLCN_CNPROC_MSG *cnprocMsg)
 			INFO(("[exit]\n"));
 			disappearedThrPid = cnprocMsg->proc_ev.event_data.exit.process_pid;
 			INFO(("disappeared pid %d imp %d exit\n", disappearedThrPid, threadSet[disappearedThrPid].importance));
-			if(threadSet[disappearedThrPid].importance != IMPORTANCE_LOW)
-				change_importance(disappearedThrPid, IMPORTANCE_LOW, false);
 			destroy_thread(disappearedThrPid);
 			break;
 		case SCREEN_EVENT:
