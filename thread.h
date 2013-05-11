@@ -24,6 +24,7 @@
  */
 #ifndef __THREAD_H__
 #define __THREAD_H__
+#define ALLSTAT_PATH "/proc/allstat"
 #include "vector.h"
 #include "importance.h"
 #include <stdbool.h>
@@ -33,18 +34,15 @@ typedef struct _THREADATTR
 	bool isUsed; // whether if there's a thread has this pid
 	bool isSysThr; // whether if it's a system service or application
 	enum IMPORTANCE_VALUE importance; // importance value of a thread(currently 0(low) or 1(mid) or 2(high))
-	int originalNice; // original nice value of a thread
-	int oldutime, oldstime, utime, stime; // aggregated execution time in jiffies
-	int execTime; // execution time in last period in jiffies, equals utime + stime - oldutime - oldstime
+	float execTime; // execution time in ms
+	float util;
 	int coreId; // this thread can run on which core
-	char name[18]; // thread name
 } THREADATTR;
 
 void initialize_threads(void);
 void initialize_thread(int pid);
 void destroy_thread(int pid);
 void calculate_utilization(void);
-float execTimeToUtil(int execTime);
 void allocation(int pid);
 void prioritize(vector *importanceChangeThrVec);
 #endif // __THREAD_H__

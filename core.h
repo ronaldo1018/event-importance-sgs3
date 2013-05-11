@@ -31,6 +31,7 @@
 #define FREQ_TABLE_TIME_IN_STATE_PATH "/sys/devices/system/cpu/cpu0/cpufreq/stats/time_in_state"
 #define FREQ_SET_PATH "/sys/devices/system/cpu/cpu0/cpufreq/scaling_setspeed"
 #define CPUINFO_PATH "/proc/stat"
+#include "vector.h"
 #include <stdbool.h>
 
 typedef struct _COREATTR
@@ -41,15 +42,15 @@ typedef struct _COREATTR
 	unsigned long long busy;
 	unsigned long long nice_busy; // count only busy time with processes' nice value > 0
 	unsigned long long idle;
-	int execTime; // execution time in last period in jiffies
-	int  midExecTime; // execution time only count mid importance thread in last period in jiffies
 	float util; // must be normalized to max level of frequency
 	float midUtil; // ignore low importance thread's util
+	vector *pidListVec; // all pid on this core in list
 } COREATTR;
 
 void initialize_cores(void);
 void DPM(void);
 void assign_core(int pid, int coreId, bool firstAssign);
+void updateMinMaxCore(void);
 void DVFS(void);
 void setFreq(int freq);
 void migration(void);

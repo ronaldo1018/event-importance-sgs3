@@ -40,6 +40,10 @@ extern bool touchIsOn;
 extern float elapseTime;
 extern int curFreq;
 extern int maxFreq;
+extern int minUtilCoreId;
+extern int maxUtilCoreId;
+extern int minImpCoreId;
+extern int maxImpCoreId;
 
 // variables or functions only used in this file
 /**
@@ -110,13 +114,11 @@ static void changeGovernorToUserspace(void);
 // process
 static int getNumProcessRunning(void);
 // core
+static void initialize_core(int coreId);
 static int getFirstOfflineCore(void);
 static void setCore(int coreId, bool turnOn);
-static int getMinImpCore(bool exceptCore0);
-static int getMaxImpCore(void);
+static int getMinImpCoreExcept0(void);
 static void balanceCoreImp(int minCoreId, int maxCoreId);
-static int getMinUtilCore(void);
-static int getMaxUtilCore(void);
 static void balanceCoreUtil(int minCoreId, int maxCoreId);
 static void PourCoreImpUtil(int minCoreId);
 
@@ -125,9 +127,8 @@ static void PourCoreImpUtil(int minCoreId);
  */
 void initialize_cores(void)
 {
-	int i, coreId;
+	int i;
 	char buff[BUFF_SIZE];
-	unsigned long long cpuinfo[10];
 	FILE *fp;
 	INFO(("initialize cores\n"));
 
@@ -140,29 +141,11 @@ void initialize_cores(void)
 		if(fp)
 		{
 			fprintf(fp, "1\n");
-			coreSet[i].online = true;
 			fclose(fp);
 		}
+		initialize_core(i);
 	}
 	numOfCoresOnline = CONFIG_NUM_OF_CORE;
-
-	// busy, idle
-	fp = fopen(CPUINFO_PATH, "r");
-	if(fp)
-	{
-		fgets(buff, BUFF_SIZE, fp); // ignore first line
-		while(fgets(buff, BUFF_SIZE, fp))
-		{
-			sscanf(buff, "cpu%d %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu", &coreId, &cpuinfo[0], &cpuinfo[1], &cpuinfo[2], &cpuinfo[3], &cpuinfo[4], &cpuinfo[5], &cpuinfo[6], &cpuinfo[7], &cpuinfo[8], &cpuinfo[9]); // time(unit: jiffies) spent of all cpus for: user nice system idle iowait irq softirq stead guest
-			coreSet[coreId].busy = cpuinfo[0] + cpuinfo[1] + cpuinfo[2] + cpuinfo[4] + cpuinfo[5] + cpuinfo[6] + cpuinfo[7] + cpuinfo[8] + cpuinfo[9];
-			coreSet[coreId].nice_busy = cpuinfo[1];
-			coreSet[coreId].idle = cpuinfo[3];
-			
-			if(coreId == CONFIG_NUM_OF_CORE - 1)
-				break;
-		}
-		fclose(fp);
-	}
 	
 	// frequency
 	getFrequencyTable();
@@ -177,6 +160,36 @@ void initialize_cores(void)
 		procRunningHistory[i] = 1;
 	sumProcRunning = CONFIG_NUM_OF_PROCESS_RUNNING_HISTORY_ENTRIES;
 	memset(midUtilHistory, 0, sizeof(float) * CONFIG_NUM_OF_HISTORY_ENTRIES);
+}
+
+static void initialize_core(int coreId)
+{
+	int curCoreId;
+	FILE *fp;
+	char buff[BUFF_SIZE];
+	unsigned long long cpuinfo[10];
+
+	memset(&coreSet[coreId], 0, sizeof(COREATTR));
+
+	// busy, idle
+	fp = fopen(CPUINFO_PATH, "r");
+	if(fp)
+	{
+		fgets(buff, BUFF_SIZE, fp); // ignore first line
+		while(fgets(buff, BUFF_SIZE, fp))
+		{
+			sscanf(buff, "cpu%d %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu", &curCoreId, &cpuinfo[0], &cpuinfo[1], &cpuinfo[2], &cpuinfo[3], &cpuinfo[4], &cpuinfo[5], &cpuinfo[6], &cpuinfo[7], &cpuinfo[8], &cpuinfo[9]); // time(unit: jiffies) spent of all cpus for: user nice system idle iowait irq softirq stead guest
+			if(curCoreId == coreId)
+			{
+				coreSet[coreId].busy = cpuinfo[0] + cpuinfo[1] + cpuinfo[2] + cpuinfo[4] + cpuinfo[5] + cpuinfo[6] + cpuinfo[7] + cpuinfo[8] + cpuinfo[9];
+				coreSet[coreId].nice_busy = cpuinfo[1];
+				coreSet[coreId].idle = cpuinfo[3];
+				coreSet[coreId].online = true;
+				break;
+			}
+		}
+		fclose(fp);
+	}
 }
 
 /**
@@ -240,12 +253,18 @@ void DPM(void)
 	while(numOfCoresShouldOpen < 0) // we have to turn off core
 	{
 		// find min importance sum core
-		minCoreId = getMinImpCore(true);
+		minCoreId = getMinImpCoreExcept0();
 		// dispatch threads to other cores
-		PourCoreImpUtil(minCoreId);
-		setCore(minCoreId, false);
+		if(minCoreId > 0)
+		{
+			PourCoreImpUtil(minCoreId);
+			setCore(minCoreId, false);
+			updateMinMaxCore();
+		}
 		numOfCoresShouldOpen++;
 	}
+
+	updateMinMaxCore();
 }
 
 /**
@@ -265,7 +284,6 @@ void assign_core(int pid, int coreId, bool firstAssign)
 	{
 		coreSet[coreId].sumOfImportance += threadSet[pid].importance;
 		coreSet[coreId].numOfThreads++;
-		coreSet[coreId].execTime += threadSet[pid].execTime;
 	}
 	else
 	{
@@ -277,19 +295,13 @@ void assign_core(int pid, int coreId, bool firstAssign)
 		coreSet[oldCoreId].numOfThreads--;
 		coreSet[coreId].numOfThreads++;
 
-		coreSet[oldCoreId].execTime -= threadSet[pid].execTime;
-		coreSet[coreId].execTime += threadSet[pid].execTime;
-
-		coreSet[oldCoreId].util = execTimeToUtil(coreSet[oldCoreId].execTime);
-		coreSet[coreId].util = execTimeToUtil(coreSet[coreId].execTime);
+		coreSet[oldCoreId].util -= threadSet[pid].util;
+		coreSet[coreId].util += threadSet[pid].util;
 
 		if(threadSet[pid].importance >= IMPORTANCE_MID)
 		{
-			coreSet[oldCoreId].midExecTime -= threadSet[pid].execTime;
-			coreSet[coreId].midExecTime += threadSet[pid].execTime;
-
-			coreSet[oldCoreId].midUtil = execTimeToUtil(coreSet[oldCoreId].midExecTime);
-			coreSet[coreId].midUtil = execTimeToUtil(coreSet[coreId].midExecTime);
+			coreSet[oldCoreId].midUtil -= threadSet[pid].util;
+			coreSet[coreId].midUtil += threadSet[pid].util;
 		}
 	}
 	threadSet[pid].coreId = coreId;
@@ -298,11 +310,37 @@ void assign_core(int pid, int coreId, bool firstAssign)
 }
 
 /**
+ * @brief updateMinMaxCore update minimal/maximum util/imp core
+ */
+void updateMinMaxCore(void)
+{
+	int i;
+	minUtilCoreId = 0;
+	maxUtilCoreId = 0;
+	minImpCoreId = 0;
+	maxImpCoreId = 0;
+
+	for(i = 1; i < CONFIG_NUM_OF_CORE; i++)
+	{
+		if(coreSet[i].online)
+		{
+			if(coreSet[i].sumOfImportance < coreSet[minImpCoreId].sumOfImportance)
+				minImpCoreId = i;
+			if(coreSet[i].sumOfImportance > coreSet[maxImpCoreId].sumOfImportance)
+				maxImpCoreId = i;
+			if(coreSet[i].util < coreSet[minUtilCoreId].util)
+				minUtilCoreId = i;
+			if(coreSet[i].util > coreSet[maxUtilCoreId].util)
+				maxUtilCoreId = i;
+		}
+	}
+}
+
+/**
  * @brief DVFS tune cpu frequency to specific level based on utilization of mid importance thread
  */
 void DVFS(void)
 {
-	int i, maxCoreId;
 	bool fastUp = false;
 	if(!CONFIG_TURN_ON_DVFS)
 		return;
@@ -310,22 +348,10 @@ void DVFS(void)
 	DVFS_INFO(("core %d has midutil %f\n", 0, coreSet[0].midUtil));
 
 	if(touchIsOn)
-	{
 		setFreq(maxFreq);
-	}
 	else
 	{
-		maxCoreId = 0;
-		for(i = 1; i < CONFIG_NUM_OF_CORE; i++)
-		{
-			DVFS_INFO(("core %d has midutil %f\n", i, coreSet[i].midUtil));
-			if(coreSet[i].midUtil > coreSet[maxCoreId].midUtil)
-			{
-				maxCoreId = i;
-			}
-		}
-
-		if(coreSet[maxCoreId].midUtil >= midUtilHistory[midUtilHistoryIndex]
+		if(coreSet[maxUtilCoreId].midUtil >= midUtilHistory[midUtilHistoryIndex]
 			&& midUtilHistory[midUtilHistoryIndex] >= midUtilHistory[(midUtilHistoryIndex - 1) % CONFIG_NUM_OF_HISTORY_ENTRIES] && curFreq != freqTable[0])
 		{
 			fastUp = true;
@@ -333,11 +359,11 @@ void DVFS(void)
 
 		// record utilization in history table
 		midUtilHistoryIndex = (midUtilHistoryIndex + 1) % CONFIG_NUM_OF_HISTORY_ENTRIES;
-		avgMidUtil = avgMidUtil + (coreSet[maxCoreId].midUtil - midUtilHistory[midUtilHistoryIndex]) / CONFIG_NUM_OF_HISTORY_ENTRIES;
-		midUtilHistory[midUtilHistoryIndex] = coreSet[maxCoreId].midUtil;
+		avgMidUtil = avgMidUtil + (coreSet[maxUtilCoreId].midUtil - midUtilHistory[midUtilHistoryIndex]) / CONFIG_NUM_OF_HISTORY_ENTRIES;
+		midUtilHistory[midUtilHistoryIndex] = coreSet[maxUtilCoreId].midUtil;
 
 		curFreq = getProperFreq(avgMidUtil, fastUp);
-		DVFS_INFO(("max mid util = %f\n", coreSet[maxCoreId].midUtil));
+		DVFS_INFO(("max mid util = %f\n", coreSet[maxUtilCoreId].midUtil));
 		DVFS_INFO(("set frequency to %d\n", curFreq));
 		setFreq(curFreq);
 	}
@@ -369,24 +395,17 @@ void setFreq(int freq)
  */
 void migration(void)
 {
-	int minCoreId, maxCoreId;
 	if(!CONFIG_TURN_ON_MIGRATION)
 		return;
 	INFO(("migration\n"));
 
 	// balance importance among cores
-	// find min importance sum core
-	minCoreId = getMinImpCore(false);
-	// find max importance sum core
-	maxCoreId = getMaxImpCore();
-	balanceCoreImp(minCoreId, maxCoreId);
+	balanceCoreImp(minImpCoreId, maxImpCoreId);
+	updateMinMaxCore();
 	
 	// balance utilization among cores
-	// find min utilization sum core
-	minCoreId = getMinUtilCore();
-	// find max utilization sum core
-	maxCoreId = getMaxUtilCore();
-	balanceCoreUtil(minCoreId, maxCoreId);
+	balanceCoreUtil(minUtilCoreId, maxUtilCoreId);
+	updateMinMaxCore();
 }
 
 /**
@@ -489,12 +508,14 @@ static int getProperFreq(float util, bool fastUp)
 {
 	int candidateFreqLevel = 0;
 	static int lastFreqLevel = 0;
+	static bool fastUpLock = false;
 
-	if(fastUp)
+	if(fastUp && !fastUpLock)
 	{
 		candidateFreqLevel = (lastFreqLevel + numOfFreq - 1) / 2;
 		if(candidateFreqLevel == lastFreqLevel && candidateFreqLevel != numOfFreq - 1)
 			candidateFreqLevel++;
+		fastUpLock = true;
 	}
 	else
 	{
@@ -510,6 +531,7 @@ static int getProperFreq(float util, bool fastUp)
 				break;
 			}
 		}
+		fastUpLock = false;
 	}
 
 	lastFreqLevel = candidateFreqLevel;
@@ -610,14 +632,13 @@ static void setCore(int coreId, bool turnOn)
 		if(turnOn)
 		{
 			fprintf(fp, "1\n");
-			memset(&coreSet[coreId], 0, sizeof(COREATTR));
-			coreSet[coreId].online = true;
+			initialize_core(coreId);
 			numOfCoresOnline++;
 		}
 		else
 		{
 			fprintf(fp, "0\n");
-			coreSet[coreId].online = false;
+			memset(&coreSet[coreId], 0, sizeof(COREATTR));
 			numOfCoresOnline--;
 		}
 		fclose(fp);
@@ -637,10 +658,14 @@ static void setCore(int coreId, bool turnOn)
  *
  * @return the core with the minimum importance sum, -1 on no such core exist
  */
-static int getMinImpCore(bool exceptCore0)
+static int getMinImpCoreExcept0(void)
 {
 	int i, minCoreId = -1;
-	for(i = exceptCore0 ? 1:0; i < CONFIG_NUM_OF_CORE; i++)
+
+	if(minImpCoreId != 0)
+		return minImpCoreId;
+
+	for(i = 1; i < CONFIG_NUM_OF_CORE; i++)
 	{
 		if(coreSet[i].online)
 		{
@@ -656,21 +681,6 @@ static int getMinImpCore(bool exceptCore0)
 }
 
 /**
- * @brief getMaxImpCore return the core with the maximum importance sum
- *
- * @return the core with the maximum importance sum
- */
-static int getMaxImpCore(void)
-{
-	int i, maxCoreId = 0;
-	for(i = 1; i < CONFIG_NUM_OF_CORE; i++)
-		if(coreSet[i].online && coreSet[i].sumOfImportance > coreSet[maxCoreId].sumOfImportance)
-			maxCoreId = i;
-	INFO(("max imp core is %d\n", maxCoreId));
-	return maxCoreId;
-}
-
-/**
  * @brief balanceCoreImp balance two cores' importance sum, search all pids, find mid importance thread on maximum sum core and move it to minimum sum core
  *
  * @param minCoreId
@@ -680,7 +690,7 @@ static void balanceCoreImp(int minCoreId, int maxCoreId)
 {
 	int startPid;
 	int avgImportance = (coreSet[minCoreId].sumOfImportance + coreSet[maxCoreId].sumOfImportance) / 2;
-	INFO(("balance imp from max core %d to min core %d\n", maxCoreId, minCoreId));
+	INFO(("balance imp from max core %d imp %d to min core %d imp %d\n", maxCoreId, coreSet[maxCoreId].sumOfImportance, minCoreId, coreSet[minCoreId].sumOfImportance));
 
 	if(minCoreId == maxCoreId)
 	{
@@ -705,36 +715,6 @@ static void balanceCoreImp(int minCoreId, int maxCoreId)
 }
 
 /**
- * @brief getMinUtilCore return the core with minimum utilization sum
- *
- * @return the core with minimum utilization sum
- */
-static int getMinUtilCore(void)
-{
-	int i, minCoreId = 0;
-	for(i = 1; i < CONFIG_NUM_OF_CORE; i++)
-		if(coreSet[i].online && coreSet[i].execTime < coreSet[minCoreId].execTime)
-			minCoreId = i;
-	INFO(("min util core is %d\n", minCoreId));
-	return minCoreId;
-}
-
-/**
- * @brief getMaxUtilCore return the core with maximum utilization sum
- *
- * @return the core with maximum utilization sum
- */
-static int getMaxUtilCore(void)
-{
-	int i, maxCoreId = 0;
-	for(i = 1; i < CONFIG_NUM_OF_CORE; i++)
-		if(coreSet[i].online && coreSet[i].execTime > coreSet[maxCoreId].execTime)
-			maxCoreId = i;
-	INFO(("max util core is %d\n", maxCoreId));
-	return maxCoreId;
-}
-
-/**
  * @brief balanceCoreUtil balance two cores' utilization sum, search all pids, find low importance thread on maximum sum core and move it to minimum sum core
  *
  * @param minCoreId
@@ -744,7 +724,7 @@ static void balanceCoreUtil(int minCoreId, int maxCoreId)
 {
 	int startPid;
 	int avgUtil = (coreSet[minCoreId].util + coreSet[maxCoreId].util) / 2;
-	INFO(("balance util from max core %d to min core %d\n", maxCoreId, minCoreId));
+	INFO(("balance util from max core %d util %f to min core %d util %f\n", maxCoreId, coreSet[maxCoreId].util, minCoreId, coreSet[minCoreId].util));
 
 	if(minCoreId == maxCoreId)
 	{
@@ -758,7 +738,7 @@ static void balanceCoreUtil(int minCoreId, int maxCoreId)
 		pidIterator = 1;
 	while(coreSet[minCoreId].util < avgUtil && pidIterator != startPid)
 	{
-		if(threadSet[pidIterator].isUsed && threadSet[pidIterator].coreId == maxCoreId && threadSet[pidIterator].execTime != 0)
+		if(threadSet[pidIterator].isUsed && threadSet[pidIterator].coreId == maxCoreId && threadSet[pidIterator].util != 0)
 		{
 			assign_core(pidIterator, minCoreId, false);
 		}
@@ -775,25 +755,8 @@ static void balanceCoreUtil(int minCoreId, int maxCoreId)
  */
 static void PourCoreImpUtil(int victimCoreId)
 {
-	int i, pid, minImpCoreId, minUtilCoreId;
+	int pid;
 	INFO(("move threads away from core %d\n", victimCoreId));
-
-	minImpCoreId = 0;
-	minUtilCoreId = 0;
-	for(i = 1; i < CONFIG_NUM_OF_CORE; i++)
-	{
-		if(coreSet[i].online && i != victimCoreId)
-		{
-			if(coreSet[i].sumOfImportance < coreSet[minImpCoreId].sumOfImportance)
-			{
-				minImpCoreId = i;
-			}
-			if(coreSet[i].execTime < coreSet[minUtilCoreId].execTime)
-			{
-				minUtilCoreId = i;
-			}
-		}
-	}
 
 	for(pid = 1; pid <= PID_MAX ; pid++)
 	{

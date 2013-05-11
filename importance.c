@@ -94,6 +94,26 @@ THREADATTR threadSet[PID_MAX];
 COREATTR coreSet[CONFIG_NUM_OF_CORE];
 
 /**
+ * @brief minimal utilization core id
+ */
+int minUtilCoreId = 0;
+
+/**
+ * @brief maximum utilization core id
+ */
+int maxUtilCoreId = 0;
+
+/**
+ * @brief minimal importance core id
+ */
+int minImpCoreId = 0;
+
+/**
+ * @brief maximum importance core id
+ */
+int maxImpCoreId = 0;
+
+/**
  * @brief the last pid that is aging
  */
 int lastAgingPid = 0;
@@ -189,23 +209,9 @@ void change_importance(int pid, enum IMPORTANCE_VALUE importance, bool firstAssi
 	INFO(("change importance %d to %d\n", pid, importance));
 	int coreId = threadSet[pid].coreId;
 	if(firstAssign)
-	{
 		coreSet[coreId].sumOfImportance += threadSet[pid].importance;
-	}
 	else
-	{
 		coreSet[coreId].sumOfImportance += importance - threadSet[pid].importance;
-		if(threadSet[pid].importance == IMPORTANCE_LOW && importance != IMPORTANCE_LOW)
-		{
-			coreSet[coreId].midExecTime += threadSet[pid].execTime;
-			coreSet[coreId].midUtil = execTimeToUtil(coreSet[coreId].midExecTime);
-		}
-		else if(threadSet[pid].importance != IMPORTANCE_LOW && importance == IMPORTANCE_LOW)
-		{
-			coreSet[coreId].midExecTime -= threadSet[pid].execTime;
-			coreSet[coreId].midUtil = execTimeToUtil(coreSet[coreId].midExecTime);
-		}
-	}
 	threadSet[pid].importance = importance;
 	vector_push(importanceChangeThrVec, &pid);
 }
@@ -215,7 +221,9 @@ void change_importance(int pid, enum IMPORTANCE_VALUE importance, bool firstAssi
  */
 void destruction(void)
 {
+	int i;
 	INFO(("destruction\n"));
+
 	vector_dispose(appearedThrVec);
 	vector_dispose(becomeBGThrVec);
 	vector_dispose(becomeFGThrVec);
@@ -226,6 +234,11 @@ void destruction(void)
 	free(becomeFGThrVec);
 	free(curActivityThrVec);
 	free(importanceChangeThrVec);
+	for(i = 0; i < CONFIG_NUM_OF_CORE; i++)
+	{
+		vector_dispose(coreSet[i].pidListVec);
+		free(coreSet[i].pidListVec);
+	}
 	destroy_timer();
 	if(nlSock != -1)
 	{
@@ -316,6 +329,7 @@ static int handle_proc_event()
  */
 static void initialize_data_structures(void)
 {
+	int i;
 	INFO(("initialize vectors\n"));
 	appearedThrVec = (vector *)malloc(sizeof(vector));
 	becomeBGThrVec = (vector *)malloc(sizeof(vector));
@@ -333,6 +347,11 @@ static void initialize_data_structures(void)
 
 	INFO(("initialize COREATTR\n"));
 	memset(coreSet, 0, sizeof(COREATTR) * CONFIG_NUM_OF_CORE);
+	for(i = 0; i < CONFIG_NUM_OF_CORE; i++)
+	{
+		coreSet[i].pidListVec = (vector *)malloc(sizeof(vector));
+		vector_init(coreSet[i].pidListVec, sizeof(int), 0, NULL);
+	}
 }
 
 /**
