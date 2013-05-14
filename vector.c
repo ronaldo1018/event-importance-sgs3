@@ -157,7 +157,7 @@ void vector_get_all(vector *v, void *elems)
  
 void vector_remove(vector *v, unsigned int index)
 {
-	assert((int) index > 0);
+	assert((int) index >= 0);
  
 	if (!VECTOR_INBOUNDS(index))
 		return;
@@ -166,6 +166,23 @@ void vector_remove(vector *v, unsigned int index)
 	v->num_elems--;
 }
  
+void vector_remove_some(vector *v, unsigned int from, unsigned int to)
+{
+	assert((int) from >= 0);
+	assert((int) to >= 0);
+	assert(from <= to);
+
+	if (!VECTOR_INBOUNDS(from))
+		return;
+	if (!VECTOR_INBOUNDS(to))
+		return;
+	if (from == to)
+		return;
+
+	memmove(VECTOR_INDEX(from), VECTOR_INDEX(to), v->elem_size * (v->num_elems - to));
+	v->num_elems -= to - from;
+}
+
 void vector_remove_all(vector *v)
 {
 	v->num_elems = 0;

@@ -47,6 +47,7 @@ extern int maxUtilCoreId;
 extern int minImpCoreId;
 extern int maxImpCoreId;
 extern vector *curActivityThrVec;
+extern vector *pidListVec[];
 extern float elapseTime;
 extern int curFreq;
 
@@ -216,13 +217,19 @@ void calculate_utilization(void)
 	/* update min/max util/imp core */
 	updateMinMaxCore();
 
-	/* use allstat kernel module to update each threads execution time */
+	/* use allstat kernel module to update each threads execution time and pid list in each core*/
+	for(i = 0; i < CONFIG_NUM_OF_CORE; i++)
+	{
+		vector_remove_all(pidListVec[i]);
+	}
+
 	fp = fopen(ALLSTAT_PATH, "r");
 	if(fp)
 	{
 		while(fgets(buff, BUFF_SIZE, fp))
 		{
 			sscanf(buff, "%d %f", &pid, &execTime);
+			vector_push(pidListVec[i], &pid);
 			threadSet[pid].util = (execTime - threadSet[pid].execTime) * curFreq;
 		}
 		fclose(fp);
@@ -268,7 +275,7 @@ void prioritize(vector *importanceChangeThrVec)
 	length = vector_length(importanceChangeThrVec);
 	for(i = 0; i < length; i++)
 	{
-		vector_get(importanceChangeThrVec, i, &pid);
+		pid = ((int *)importanceChangeThrVec->elems)[i];
 		switch(threadSet[pid].importance)
 		{
 			case IMPORTANCE_LOW:

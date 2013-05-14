@@ -36,6 +36,7 @@
 
 extern THREADATTR threadSet[];
 extern COREATTR coreSet[];
+extern vector *pidListVec[];
 extern bool touchIsOn;
 extern float elapseTime;
 extern int curFreq;
@@ -101,11 +102,6 @@ static int numOfCoresOnline = 0;
  */
 static int Thres[3] = {CONFIG_THRESHOLD2, CONFIG_THRESHOLD3, CONFIG_THRESHOLD4};
 
-/**
- * @brief iterate all pid, used when balance core importance or utilization
- */
-static int pidIterator = 1;
-
 // frequency
 static void getFrequencyTable(void);
 static int getCurFreq(void);
@@ -170,6 +166,7 @@ static void initialize_core(int coreId)
 	unsigned long long cpuinfo[10];
 
 	memset(&coreSet[coreId], 0, sizeof(COREATTR));
+	vector_remove_all(pidListVec[coreId]);
 
 	// busy, idle
 	fp = fopen(CPUINFO_PATH, "r");
@@ -639,6 +636,7 @@ static void setCore(int coreId, bool turnOn)
 		{
 			fprintf(fp, "0\n");
 			memset(&coreSet[coreId], 0, sizeof(COREATTR));
+			vector_remove_all(pidListVec[coreId]);
 			numOfCoresOnline--;
 		}
 		fclose(fp);
@@ -688,7 +686,7 @@ static int getMinImpCoreExcept0(void)
  */
 static void balanceCoreImp(int minCoreId, int maxCoreId)
 {
-	int startPid;
+	int i = 0, length, pid;
 	int avgImportance = (coreSet[minCoreId].sumOfImportance + coreSet[maxCoreId].sumOfImportance) / 2;
 	INFO(("balance imp from max core %d imp %d to min core %d imp %d\n", maxCoreId, coreSet[maxCoreId].sumOfImportance, minCoreId, coreSet[minCoreId].sumOfImportance));
 
@@ -698,19 +696,17 @@ static void balanceCoreImp(int minCoreId, int maxCoreId)
 		return;
 	}
 
-	startPid = pidIterator;
-	pidIterator++;
-	if(pidIterator > PID_MAX)
-		pidIterator = 1;
-	while(coreSet[minCoreId].sumOfImportance < avgImportance && pidIterator != startPid)
+	length = vector_length(pidListVec[maxCoreId]);
+	if(length != 0)
 	{
-		if(threadSet[pidIterator].isUsed && threadSet[pidIterator].coreId == maxCoreId)
+		pid = ((int *)pidListVec[maxCoreId]->elems)[0];
+		for(i = 0; i < length && coreSet[minCoreId].sumOfImportance + threadSet[pid].importance < avgImportance; i++)
 		{
-			assign_core(pidIterator, minCoreId, false);
+			pid = ((int *)pidListVec[maxCoreId]->elems)[i];
+			vector_push(pidListVec[minCoreId], &pid);
+			assign_core(pid, minCoreId, false);
 		}
-		pidIterator++;
-		if(pidIterator > PID_MAX)
-			pidIterator = 1;
+		vector_remove_some(pidListVec[maxCoreId], 0, i);
 	}
 }
 
@@ -722,7 +718,7 @@ static void balanceCoreImp(int minCoreId, int maxCoreId)
  */
 static void balanceCoreUtil(int minCoreId, int maxCoreId)
 {
-	int startPid;
+	int i = 0, length, pid;
 	int avgUtil = (coreSet[minCoreId].util + coreSet[maxCoreId].util) / 2;
 	INFO(("balance util from max core %d util %f to min core %d util %f\n", maxCoreId, coreSet[maxCoreId].util, minCoreId, coreSet[minCoreId].util));
 
@@ -732,19 +728,17 @@ static void balanceCoreUtil(int minCoreId, int maxCoreId)
 		return;
 	}
 	
-	startPid = pidIterator;
-	pidIterator++;
-	if(pidIterator > PID_MAX)
-		pidIterator = 1;
-	while(coreSet[minCoreId].util < avgUtil && pidIterator != startPid)
+	length = vector_length(pidListVec[maxCoreId]);
+	if(length != 0)
 	{
-		if(threadSet[pidIterator].isUsed && threadSet[pidIterator].coreId == maxCoreId && threadSet[pidIterator].util != 0)
+		pid = ((int *)pidListVec[maxCoreId]->elems)[0];
+		for(i = 0; i < length && coreSet[minCoreId].util + threadSet[pid].util < avgUtil; i++)
 		{
-			assign_core(pidIterator, minCoreId, false);
+			pid = ((int *)pidListVec[maxCoreId]->elems)[i];
+			vector_push(pidListVec[minCoreId], &pid);
+			assign_core(pid, minCoreId, false);
 		}
-		pidIterator++;
-		if(pidIterator > PID_MAX)
-			pidIterator = 1;
+		vector_remove_some(pidListVec[maxCoreId], 0, i);
 	}
 }
 
@@ -755,21 +749,29 @@ static void balanceCoreUtil(int minCoreId, int maxCoreId)
  */
 static void PourCoreImpUtil(int victimCoreId)
 {
-	int pid;
+	int i, length, pid;
+	int localMinImpCoreId = 0, localMinUtilCoreId = 0;
 	INFO(("move threads away from core %d\n", victimCoreId));
 
-	for(pid = 1; pid <= PID_MAX ; pid++)
+	for(i = 1; i < CONFIG_NUM_OF_CORE; i++)
 	{
-		if(threadSet[pid].isUsed && threadSet[pid].coreId == victimCoreId)
+		if(coreSet[i].online && i != victimCoreId)
 		{
-			if(threadSet[pid].importance >= IMPORTANCE_MID) // use importance sum to determine which core to pour
-			{
-				assign_core(pid, minImpCoreId, false);
-			}
-			else // importance = IMPORTANCE_LOW, use utilization sum to determine which core to pour
-			{
-				assign_core(pid, minUtilCoreId, false);
-			}
+			if(coreSet[i].sumOfImportance < coreSet[localMinImpCoreId].sumOfImportance)
+				localMinImpCoreId = i;
+			if(coreSet[i].util < coreSet[localMinUtilCoreId].util)
+				localMinUtilCoreId = i;
 		}
 	}
+
+	length = vector_length(pidListVec[victimCoreId]);
+	for(i = 0; i < length; i++)
+	{
+		pid = ((int *)pidListVec[victimCoreId])[i];
+		if(threadSet[pid].importance >= IMPORTANCE_MID) // use importance sum to determine which core to pour
+			assign_core(pid, localMinImpCoreId, false);
+		else // importance = IMPORTANCE_LOW, use utilization sum to determine which core to pour
+			assign_core(pid, localMinUtilCoreId, false);
+	}
+	vector_remove_all(pidListVec[victimCoreId]);
 }

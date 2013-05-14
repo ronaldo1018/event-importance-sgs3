@@ -44,7 +44,6 @@ typedef struct _COREATTR
 	unsigned long long idle;
 	float util; // must be normalized to max level of frequency
 	float midUtil; // ignore low importance thread's util
-	vector *pidListVec; // all pid on this core in list
 } COREATTR;
 
 void initialize_cores(void);

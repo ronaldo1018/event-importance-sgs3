@@ -84,6 +84,11 @@ vector *curActivityThrVec;
 vector *importanceChangeThrVec;
 
 /**
+ * @brief store pid list in each core
+ */
+vector *pidListVec[CONFIG_NUM_OF_CORE];
+
+/**
  * @brief data structure to store thread information
  */
 THREADATTR threadSet[PID_MAX];
@@ -236,8 +241,8 @@ void destruction(void)
 	free(importanceChangeThrVec);
 	for(i = 0; i < CONFIG_NUM_OF_CORE; i++)
 	{
-		vector_dispose(coreSet[i].pidListVec);
-		free(coreSet[i].pidListVec);
+		vector_dispose(pidListVec[i]);
+		free(pidListVec[i]);
 	}
 	destroy_timer();
 	if(nlSock != -1)
@@ -341,17 +346,17 @@ static void initialize_data_structures(void)
 	vector_init(becomeFGThrVec, sizeof(int), 0, NULL);
 	vector_init(curActivityThrVec, sizeof(int), 0, NULL);
 	vector_init(importanceChangeThrVec, sizeof(int), 0, NULL);
+	for(i = 0; i < CONFIG_NUM_OF_CORE; i++)
+	{
+		pidListVec[i] = (vector *)malloc(sizeof(vector));
+		vector_init(pidListVec[i], sizeof(int), 0, NULL);
+	}
 
 	INFO(("initialize THREADATTR\n"));
 	memset(threadSet, 0, sizeof(THREADATTR) * PID_MAX);
 
 	INFO(("initialize COREATTR\n"));
 	memset(coreSet, 0, sizeof(COREATTR) * CONFIG_NUM_OF_CORE);
-	for(i = 0; i < CONFIG_NUM_OF_CORE; i++)
-	{
-		coreSet[i].pidListVec = (vector *)malloc(sizeof(vector));
-		vector_init(coreSet[i].pidListVec, sizeof(int), 0, NULL);
-	}
 }
 
 /**
@@ -435,14 +440,14 @@ static void produce_importance(NLCN_CNPROC_MSG *cnprocMsg)
 							length = vector_length(becomeBGThrVec);
 							for(i = 0; i < length; i++)
 							{
-								vector_get(becomeBGThrVec, i, &activityChangeThrPid);
+								activityChangeThrPid = ((int *)becomeBGThrVec->elems)[i];
 								change_importance(activityChangeThrPid, IMPORTANCE_LOW, false);
 							}
 							
 							length = vector_length(becomeFGThrVec);
 							for(i = 0; i < length; i++)
 							{
-								vector_get(becomeFGThrVec, i, &activityChangeThrPid);
+								activityChangeThrPid = ((int *)becomeBGThrVec->elems)[i];
 								change_importance(activityChangeThrPid, IMPORTANCE_MID, false);
 							}
 						}
@@ -575,7 +580,7 @@ static void importance_mid_to_high(void)
 		length = vector_length(curActivityThrVec);
 		for(i = 0; i < length; i++)
 		{
-			vector_get(curActivityThrVec, i, &pid);
+			pid = ((int *)curActivityThrVec->elems)[i];
 			change_importance(pid, IMPORTANCE_HIGH, false);
 		}
 		turn_on_temp_high_timer();
@@ -610,7 +615,7 @@ static void cur_activity_importance_to_low(void)
 	length = vector_length(curActivityThrVec);
 	for(i = 0; i < length; i++)
 	{
-		vector_get(curActivityThrVec, i, &pid);
+		pid = ((int *)curActivityThrVec->elems)[i];
 		change_importance(pid, IMPORTANCE_LOW, false);
 	}
 }
@@ -628,7 +633,7 @@ static void cur_activity_importance_to_mid(void)
 	length = vector_length(curActivityThrVec);
 	for(i = 0; i < length; i++)
 	{
-		vector_get(curActivityThrVec, i, &pid);
+		pid = ((int *)curActivityThrVec->elems)[i];
 		INFO(("vector_get %d\n", pid));
 		change_importance(pid, IMPORTANCE_MID, false);
 	}

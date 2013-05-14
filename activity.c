@@ -59,7 +59,7 @@ void initialize_activity(void)
 	length = vector_length(curActivityThrVec);
 	for(i = 0; i < length; i++)
 	{
-		vector_get(curActivityThrVec, i, &pid);
+		pid = ((int *)curActivityThrVec->elems)[i];
 		change_importance(pid, IMPORTANCE_MID, false);
 	}
 }

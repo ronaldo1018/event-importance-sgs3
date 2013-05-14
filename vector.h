@@ -31,6 +31,7 @@ void vector_shift(vector *, void *);
 void vector_unshift(vector *, void *);
 void vector_get(vector *, unsigned int, void *);
 void vector_remove(vector *, unsigned int);
+void vector_remove_some(vector *, unsigned int, unsigned int);
 void vector_remove_all(vector *v);
 void vector_transpose(vector *, unsigned int, unsigned int);
 unsigned int vector_length(vector *);
