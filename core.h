@@ -39,6 +39,9 @@ typedef struct _COREATTR
 	bool online;
 	int sumOfImportance;
 	int numOfThreads;
+	int numOfMidThreads;
+	int numOfRunningThreads;
+	int numOfRunningMidThreads;
 	unsigned long long busy;
 	unsigned long long nice_busy; // count only busy time with processes' nice value > 0
 	unsigned long long idle;

@@ -24,7 +24,7 @@
  */
 #ifndef __DEBUG_H__
 #define __DEBUG_H__
-#define DEBUG_ERR 0
+#define DEBUG_ERR 1
 #define DEBUG_INFO 0
 #define DEBUG_DVFS_INFO 0
 #define ERR(x) do { if (DEBUG_ERR) dbg_printf x; } while (0)

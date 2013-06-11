@@ -138,7 +138,7 @@ static int getCurActivityPid(void)
 	}
 	else
 	{
-		fprintf(stderr, "cannot popen dumpsys\n");
+		ERR(("cannot popen dumpsys\n"));
 	}
 
 	if(found)
@@ -148,7 +148,7 @@ static int getCurActivityPid(void)
 	}
 	else
 	{
-		fprintf(stderr, "cannot get activity pid\n");
+		ERR(("cannot get activity pid\n"));
 		return -1;
 	}
 
@@ -192,6 +192,6 @@ static void putThreadGroupToVector(vector *threadGroup, int pid)
 	}
 	else
 	{
-		fprintf(stderr, "directory %s not found\n", buff);
+		ERR(("directory %s not found\n", buff));
 	}
 }

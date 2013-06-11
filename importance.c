@@ -91,7 +91,7 @@ vector *pidListVec[CONFIG_NUM_OF_CORE];
 /**
  * @brief data structure to store thread information
  */
-THREADATTR threadSet[PID_MAX];
+THREADATTR threadSet[PID_MAX+1];
 
 /**
  * @brief data structure to store cpu core information
@@ -121,7 +121,7 @@ int maxImpCoreId = 0;
 /**
  * @brief the last pid that is aging
  */
-int lastAgingPid = 0;
+int lastAgingPid = 1;
 
 /**
  * @brief elapse time since last utilization calculation
@@ -264,7 +264,7 @@ static void prioritize_self(void)
 	INFO(("pid = %d, ret = %d\n", getpid(), ret));
 	if(ret)
 	{
-		fprintf(stderr, "cannot set nice value, ret: %d\n", ret);
+		ERR(("cannot set nice value, ret: %d\n", ret));
 		exit(EXIT_FAILURE);
 	}
 }
@@ -306,8 +306,7 @@ static int handle_proc_event()
 		else if(ret == -1)
 		{
 			if(errno == EINTR) continue;
-			fprintf(stderr, "netlink recv error\n");
-			perror("netlink recv error");
+			ERR(("netlink recv error\n"));
 			return -1;
 		}
 
@@ -400,10 +399,7 @@ static void produce_importance(NLCN_CNPROC_MSG *cnprocMsg)
 				case 0: // screen off
 					INFO(("screen turn off\n"));
 					if(CONFIG_TURN_ON_AGING)
-					{
 						agingIsOn = false;
-						switch_aging_timer(false);
-					}
 					cur_activity_importance_to_low();
 					break;
 				case 1: // screen on
@@ -411,12 +407,11 @@ static void produce_importance(NLCN_CNPROC_MSG *cnprocMsg)
 					if(CONFIG_TURN_ON_AGING)
 					{
 						agingIsOn = true;
-						switch_aging_timer(true);
 					}
 					cur_activity_importance_to_mid();
 					break;
 				default:
-					fprintf(stderr, "no such screen event\n");
+					ERR(("no such screen event\n"));
 					break;
 			}
 		case TIMER_TICK_EVENT:
@@ -447,7 +442,7 @@ static void produce_importance(NLCN_CNPROC_MSG *cnprocMsg)
 							length = vector_length(becomeFGThrVec);
 							for(i = 0; i < length; i++)
 							{
-								activityChangeThrPid = ((int *)becomeBGThrVec->elems)[i];
+								activityChangeThrPid = ((int *)becomeFGThrVec->elems)[i];
 								change_importance(activityChangeThrPid, IMPORTANCE_MID, false);
 							}
 						}
@@ -464,26 +459,29 @@ static void produce_importance(NLCN_CNPROC_MSG *cnprocMsg)
 							importance_mid_to_high();
 						}
 					}
+
+					// aging
+					if(CONFIG_TURN_ON_AGING)
+					{
+						if(agingIsOn)
+							aging();
+					}
 					break;
-				case 1: // aging
+				case 1: // temp high
 					INFO(("timer: timer1 tick\n"));
-					if(agingIsOn)
-						aging();
-					break;
-				case 2: // temp high
-					INFO(("timer: timer2 tick\n"));
 					importance_back_to_mid();
 					reenable_touch();
 					touchIsOn = false;
 					break;
 				default:
-					fprintf(stderr, "no such timer_no %d\n", timer_no);
+					ERR(("no such timer_no %d\n", timer_no));
 					break;
 			}
 			break;
 		case TOUCH_EVENT:
 			INFO(("[touch]\n"));
 			touchIsOn = true;
+			curFreq = maxFreq;
 			setFreq(maxFreq); // early set frequency to highest
 			importance_mid_to_high();
 			break;
@@ -527,20 +525,16 @@ static void do_action(NLCN_CNPROC_MSG *cnprocMsg)
 			switch(timer_no)
 			{
 				case 0: // utilization sampling
-					calculate_utilization();
-					DPM();
-					migration();
-					DVFS();
-					turn_on_sampling_timer();
-					break;
-				case 1: // aging
-					if(vector_length(importanceChangeThrVec) != 0)
+					if(!touchIsOn)
 					{
-						prioritize(importanceChangeThrVec);
+						calculate_utilization();
+						DPM();
+						migration();
 						DVFS();
 					}
+					turn_on_sampling_timer();
 					break;
-				case 2: // temp high
+				case 1: // temp high
 					if(vector_length(importanceChangeThrVec) != 0)
 					{
 						prioritize(importanceChangeThrVec);
@@ -548,7 +542,7 @@ static void do_action(NLCN_CNPROC_MSG *cnprocMsg)
 					}
 					break;
 				default:
-					fprintf(stderr, "no such timer_no %d\n", timer_no);
+					ERR(("no such timer_no %d\n", timer_no));
 					break;
 			}
 			break;
@@ -556,7 +550,7 @@ static void do_action(NLCN_CNPROC_MSG *cnprocMsg)
 			if(vector_length(importanceChangeThrVec) != 0)
 			{
 				prioritize(importanceChangeThrVec);
-				DVFS();
+				//DVFS();
 			}
 			break;
 		default:
@@ -587,7 +581,7 @@ static void importance_mid_to_high(void)
 	}
 	else
 	{
-		fprintf(stderr, "cannot get current foreground activity threads\n");
+		ERR(("cannot get current foreground activity threads\n"));
 		destruction();
 		exit(EXIT_FAILURE);
 	}
@@ -645,23 +639,29 @@ static void cur_activity_importance_to_mid(void)
 static void aging(void)
 {
 	// TODO: modify aging time
-	int pid;
 	INFO(("aging\n"));
-	for(pid = (lastAgingPid + 1) % (PID_MAX + 1);; pid = (pid + 1) % (PID_MAX + 1))
+	int pidIterator = lastAgingPid + 1;
+	if(pidIterator > PID_MAX)
+		pidIterator = 1;
+	while(pidIterator != lastAgingPid)
 	{
-		if(threadSet[pid].isUsed && threadSet[pid].importance == IMPORTANCE_LOW)
+		if(threadSet[pidIterator].isUsed && threadSet[pidIterator].importance == IMPORTANCE_LOW && threadSet[pidIterator].util != 0)
 		{
-			INFO(("aging old %d new %d\n", lastAgingPid, pid));
-			change_importance(lastAgingPid, IMPORTANCE_LOW, false);
-			change_importance(pid, IMPORTANCE_MID, false);
-			lastAgingPid = pid;
+			INFO(("aging old %d new %d\n", lastAgingPid, pidIterator));
+			if(!threadSet[lastAgingPid].isSysThr)
+				change_importance(lastAgingPid, IMPORTANCE_LOW, false);
+			change_importance(pidIterator, IMPORTANCE_MID, false);
+			lastAgingPid = pidIterator;
 			break;
 		}
-		else if(pid == lastAgingPid)
-		{
-			INFO(("no low thread, get period back to 1s\n"));
-			lastAgingPid = 0;
-		}
+		pidIterator++;
+		if(pidIterator > PID_MAX)
+			pidIterator = 1;
+	}
+	if(pidIterator == lastAgingPid)
+	{
+		INFO(("no low thread, get period back to 1s\n"));
+		lastAgingPid = 1;
 	}
 }
 

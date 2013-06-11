@@ -40,7 +40,7 @@ void initialize_timer(void)
 	FILE *fp;
 	INFO(("initialize timer\n"));
 
-	// initialize first timer for utilization sampling
+	// initialize timer for utilization sampling
 	fp = fopen(TIMER0_TIME_PATH, "w");
 	if(fp)
 	{
@@ -49,10 +49,25 @@ void initialize_timer(void)
 	}
 	else
 	{
-		fprintf(stderr, "cannot setup timer0\n");
+		ERR(("cannot setup timer0\n"));
 		destruction();
 		exit(EXIT_FAILURE);
 	}
+
+	// initialize timer for temp high
+	fp = fopen(TIMER1_TIME_PATH, "w");
+	if(fp)
+	{
+		fprintf(fp, "%d\n", CONFIG_TMP_HIGH_TIME);
+		fclose(fp);
+	}
+	else
+	{
+		ERR(("cannot setup timer1\n"));
+		destruction();
+		exit(EXIT_FAILURE);
+	}
+
 	fp = fopen(TIMER0_ENABLE_PATH, "w");
 	if(fp)
 	{
@@ -61,39 +76,13 @@ void initialize_timer(void)
 	}
 	else
 	{
-		fprintf(stderr, "cannot setup timer0\n");
+		ERR(("cannot setup timer0\n"));
 		destruction();
 		exit(EXIT_FAILURE);
 	}
 
-	if(!CONFIG_TURN_ON_AGING)
-		return;
-	agingIsOn = true;
-	// initialize second timer for aging
-	fp = fopen(TIMER1_TIME_PATH, "w");
-	if(fp)
-	{
-		fprintf(fp, "%d\n", CONFIG_INITIAL_AGING_TIME);
-		fclose(fp);
-	}
-	else
-	{
-		fprintf(stderr, "cannot setup timer1\n");
-		destruction();
-		exit(EXIT_FAILURE);
-	}
-	fp = fopen(TIMER1_ENABLE_PATH, "w");
-	if(fp)
-	{
-		fprintf(fp, "1\n");
-		fclose(fp);
-	}
-	else
-	{
-		fprintf(stderr, "cannot setup timer1\n");
-		destruction();
-		exit(EXIT_FAILURE);
-	}
+	if(CONFIG_TURN_ON_AGING)
+		agingIsOn = true;
 }
 
 /**
@@ -112,7 +101,7 @@ void destroy_timer(void)
 	}
 	else
 	{
-		fprintf(stderr, "cannot stop timer0\n");
+		ERR(("cannot stop timer0\n"));
 	}
 
 	fp = fopen(TIMER1_ENABLE_PATH, "w");
@@ -123,18 +112,7 @@ void destroy_timer(void)
 	}
 	else
 	{
-		fprintf(stderr, "cannot stop timer1\n");
-	}
-
-	fp = fopen(TIMER2_ENABLE_PATH, "w");
-	if(fp)
-	{
-		fprintf(fp, "0\n");
-		fclose(fp);
-	}
-	else
-	{
-		fprintf(stderr, "cannot stop timer2\n");
+		ERR(("cannot stop timer1\n"));
 	}
 }
 
@@ -151,26 +129,7 @@ void turn_on_sampling_timer(void)
 	}
 	else
 	{
-		fprintf(stderr, "cannot setup timer0\n");
-		destruction();
-		exit(EXIT_FAILURE);
-	}
-}
-
-void switch_aging_timer(bool on)
-{
-	FILE *fp;
-	INFO(("turn %s aging timer\n", on?"on":"off"));
-
-	fp = fopen(TIMER1_ENABLE_PATH, "w");
-	if(fp)
-	{
-		fprintf(fp, "%d\n", on?1:0);
-		fclose(fp);
-	}
-	else
-	{
-		fprintf(stderr, "cannot setup timer1\n");
+		ERR(("cannot setup timer0\n"));
 		destruction();
 		exit(EXIT_FAILURE);
 	}
@@ -184,20 +143,7 @@ void turn_on_temp_high_timer(void)
 	FILE *fp;
 	INFO(("turn on temp high timer\n"));
 
-	// initialize first timer for utilization sampling
-	fp = fopen(TIMER2_TIME_PATH, "w");
-	if(fp)
-	{
-		fprintf(fp, "%d\n", CONFIG_TMP_HIGH_TIME);
-		fclose(fp);
-	}
-	else
-	{
-		fprintf(stderr, "cannot setup timer2\n");
-		destruction();
-		exit(EXIT_FAILURE);
-	}
-	fp = fopen(TIMER2_ENABLE_PATH, "w");
+	fp = fopen(TIMER1_ENABLE_PATH, "w");
 	if(fp)
 	{
 		fprintf(fp, "1\n");
@@ -205,7 +151,7 @@ void turn_on_temp_high_timer(void)
 	}
 	else
 	{
-		fprintf(stderr, "cannot setup timer2\n");
+		ERR(("cannot setup timer1\n"));
 		destruction();
 		exit(EXIT_FAILURE);
 	}

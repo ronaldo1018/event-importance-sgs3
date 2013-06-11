@@ -86,7 +86,7 @@ void initialize_threads(void)
 	}
 	else
 	{
-		fprintf(stderr, "cannot open directory /proc\n");
+		ERR(("cannot open directory /proc\n"));
 	}
 
 	/* use allstat kernel module to get each threads execution time */
@@ -153,6 +153,8 @@ void destroy_thread(int pid)
 	threadSet[pid].isUsed = 0;
 	coreSet[coreId].sumOfImportance -= threadSet[pid].importance;
 	coreSet[coreId].numOfThreads--;
+	if(threadSet[pid].importance >= IMPORTANCE_MID)
+		coreSet[coreId].numOfMidThreads--;
 }
 
 /**
@@ -175,6 +177,8 @@ void calculate_utilization(void)
 	{
 		coreSet[i].util = 0;
 		coreSet[i].midUtil = 0;
+		coreSet[i].numOfRunningThreads = 0;
+		coreSet[i].numOfRunningMidThreads = 0;
 	}
 
 	// update timestamp
@@ -199,8 +203,16 @@ void calculate_utilization(void)
 				nice_busysub = nice_busy - coreSet[coreId].nice_busy;
 				idle = cpuinfo[3];
 				idlesub = idle - coreSet[coreId].idle;
-				coreSet[coreId].util = (float)(busysub) / (busysub + idlesub) * curFreq;
-				coreSet[coreId].midUtil = (float)(busysub - nice_busysub) / (busysub + idlesub) * curFreq;
+				if(busysub + idlesub == 0)
+				{
+					coreSet[coreId].util = 0;
+					coreSet[coreId].midUtil = 0;
+				}
+				else
+				{
+					coreSet[coreId].util = (float)(busysub) / (busysub + idlesub) * curFreq;
+					coreSet[coreId].midUtil = (float)(busysub - nice_busysub) / (busysub + idlesub) * curFreq;
+				}
 				INFO(("core %d: util %f midUtil %f\n", coreId, coreSet[coreId].util, coreSet[coreId].midUtil));
 				coreSet[coreId].busy = busy;
 				coreSet[coreId].nice_busy = nice_busy;
@@ -231,6 +243,12 @@ void calculate_utilization(void)
 			sscanf(buff, "%d %f", &pid, &execTime);
 			vector_push(pidListVec[i], &pid);
 			threadSet[pid].util = (execTime - threadSet[pid].execTime) * curFreq;
+			if(threadSet[pid].util != 0)
+			{
+				coreSet[threadSet[pid].coreId].numOfRunningThreads++;
+				if(threadSet[pid].importance >= IMPORTANCE_MID)
+					coreSet[threadSet[pid].coreId].numOfRunningMidThreads++;
+			}
 		}
 		fclose(fp);
 	}
@@ -288,7 +306,7 @@ void prioritize(vector *importanceChangeThrVec)
 				ret = setpriority(PRIO_PROCESS, pid, CONFIG_NICE_HIGH);
 				break;
 			default:
-				fprintf(stderr, "unknown importance %d\n", threadSet[pid].importance);
+				ERR(("unknown importance %d\n", threadSet[pid].importance));
 				destruction();
 				exit(EXIT_FAILURE);
 				break;

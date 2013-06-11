@@ -30,30 +30,28 @@
 #define CONFIG_TURN_ON_MIGRATION 1
 #define CONFIG_TURN_ON_PRIORITIZE 1
 #define CONFIG_TURN_ON_DVFS 1
-#define CONFIG_TURN_ON_AGING 0
+#define CONFIG_TURN_ON_AGING 1
 
 // timer
 #define CONFIG_CORE_UPDATE_TIME 105
 #define CONFIG_HZ 200
 #define JIFFIES_TIME(x)             ((int)(CONFIG_HZ * x))
 #define CONFIG_UTILIZATION_SAMPLING_TIME	JIFFIES_TIME(0.2)
-#define CONFIG_TMP_MID_TIME					JIFFIES_TIME(0.15)
 #define CONFIG_TMP_HIGH_TIME				JIFFIES_TIME(0.5)
-#define CONFIG_INITIAL_AGING_TIME			JIFFIES_TIME(1) // only used when initialize, aging time will change based on number of low importance threads
 #define CONFIG_CHECK_ACTIVITY_TIME			5
 // nice
 #define CONFIG_NICE_HIGH					-20
 #define CONFIG_NICE_MID						-10
 #define CONFIG_NICE_LOW						10
+#define CONFIG_MID_WEIGHT_OVER_LOW			86 /* (1.25^20) */
 // DVFS
 #define CONFIG_USE_TIME_IN_STATE_FREQUENCY_TABLE 1
 #define CONFIG_SCALE_UP_RATIO 0.75
 #define CONFIG_NUM_OF_HISTORY_ENTRIES 2
-#define CONFIG_FAST_MID_UTIL_ENABLED ((CONFIG_NICE_HIGH <= 0) && (CONFIG_NICE_MID <= 0) && (CONFIG_NICE_LOW > 0))
 // DPM
-#define CONFIG_THRESHOLD2 500000 /* switch threshold of 1 or 2 core, utilsum = 400000 */
-#define CONFIG_THRESHOLD3 900000 /* switch threshold of 2 or 3 core, utilsum = 800000 */
-#define CONFIG_THRESHOLD4 1800000 /* switch threshold of 3 or 4 core, utilsum = 1700000 */
+#define CONFIG_THRESHOLD2 400000 /* switch threshold of 1 or 2 core, utilsum = 400000 */
+#define CONFIG_THRESHOLD3 800000 /* switch threshold of 2 or 3 core, utilsum = 800000 */
+#define CONFIG_THRESHOLD4 1700000 /* switch threshold of 3 or 4 core, utilsum = 1700000 */
 #define CONFIG_NUM_OF_CORE 4
 #define CONFIG_NUM_OF_PROCESS_RUNNING_HISTORY_ENTRIES 3
 // touch

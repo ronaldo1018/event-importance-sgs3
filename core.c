@@ -83,7 +83,7 @@ static int avgProcRunning = 0;
 static float midUtilHistory[CONFIG_NUM_OF_HISTORY_ENTRIES];
 
 /**
- * @brief record last entry index in midUtilHistroy array
+ * @brief record last entry index in midUtilHistory array
  */
 static int midUtilHistoryIndex = 0;
 
@@ -105,7 +105,7 @@ static int Thres[3] = {CONFIG_THRESHOLD2, CONFIG_THRESHOLD3, CONFIG_THRESHOLD4};
 // frequency
 static void getFrequencyTable(void);
 static int getCurFreq(void);
-static int getProperFreq(float util, bool fastUp);
+static int getProperFreq(float util);
 static void changeGovernorToUserspace(void);
 // process
 static int getNumProcessRunning(void);
@@ -166,6 +166,7 @@ static void initialize_core(int coreId)
 	unsigned long long cpuinfo[10];
 
 	memset(&coreSet[coreId], 0, sizeof(COREATTR));
+	coreSet[coreId].online = true;
 	vector_remove_all(pidListVec[coreId]);
 
 	// busy, idle
@@ -181,7 +182,6 @@ static void initialize_core(int coreId)
 				coreSet[coreId].busy = cpuinfo[0] + cpuinfo[1] + cpuinfo[2] + cpuinfo[4] + cpuinfo[5] + cpuinfo[6] + cpuinfo[7] + cpuinfo[8] + cpuinfo[9];
 				coreSet[coreId].nice_busy = cpuinfo[1];
 				coreSet[coreId].idle = cpuinfo[3];
-				coreSet[coreId].online = true;
 				break;
 			}
 		}
@@ -281,6 +281,8 @@ void assign_core(int pid, int coreId, bool firstAssign)
 	{
 		coreSet[coreId].sumOfImportance += threadSet[pid].importance;
 		coreSet[coreId].numOfThreads++;
+		if(threadSet[pid].importance >= IMPORTANCE_MID)
+			coreSet[coreId].numOfMidThreads++;
 	}
 	else
 	{
@@ -291,6 +293,12 @@ void assign_core(int pid, int coreId, bool firstAssign)
 
 		coreSet[oldCoreId].numOfThreads--;
 		coreSet[coreId].numOfThreads++;
+
+		if(threadSet[pid].importance >= IMPORTANCE_MID)
+		{
+			coreSet[oldCoreId].numOfMidThreads--;
+			coreSet[coreId].numOfMidThreads++;
+		}
 
 		coreSet[oldCoreId].util -= threadSet[pid].util;
 		coreSet[coreId].util += threadSet[pid].util;
@@ -338,32 +346,31 @@ void updateMinMaxCore(void)
  */
 void DVFS(void)
 {
-	bool fastUp = false;
+	float weight, curUtil;
 	if(!CONFIG_TURN_ON_DVFS)
 		return;
 	INFO(("DVFS\n"));
-	DVFS_INFO(("core %d has midutil %f\n", 0, coreSet[0].midUtil));
 
 	if(touchIsOn)
-		setFreq(maxFreq);
-	else
 	{
-		if(coreSet[maxUtilCoreId].midUtil >= midUtilHistory[midUtilHistoryIndex]
-			&& midUtilHistory[midUtilHistoryIndex] >= midUtilHistory[(midUtilHistoryIndex - 1) % CONFIG_NUM_OF_HISTORY_ENTRIES] && curFreq != freqTable[0])
-		{
-			fastUp = true;
-		}
-
-		// record utilization in history table
-		midUtilHistoryIndex = (midUtilHistoryIndex + 1) % CONFIG_NUM_OF_HISTORY_ENTRIES;
-		avgMidUtil = avgMidUtil + (coreSet[maxUtilCoreId].midUtil - midUtilHistory[midUtilHistoryIndex]) / CONFIG_NUM_OF_HISTORY_ENTRIES;
-		midUtilHistory[midUtilHistoryIndex] = coreSet[maxUtilCoreId].midUtil;
-
-		curFreq = getProperFreq(avgMidUtil, fastUp);
-		DVFS_INFO(("max mid util = %f\n", coreSet[maxUtilCoreId].midUtil));
-		DVFS_INFO(("set frequency to %d\n", curFreq));
-		setFreq(curFreq);
+		INFO(("touchIsOn, ignore DVFS\n"));
+		return; // already early set freq to max
 	}
+
+	// record utilization in history table
+	midUtilHistoryIndex = (midUtilHistoryIndex + 1) % CONFIG_NUM_OF_HISTORY_ENTRIES;
+	weight = 1 + (float)(coreSet[maxUtilCoreId].numOfRunningThreads - coreSet[maxUtilCoreId].numOfRunningMidThreads) / (coreSet[maxUtilCoreId].numOfRunningMidThreads * CONFIG_MID_WEIGHT_OVER_LOW);
+	curUtil = coreSet[maxUtilCoreId].midUtil * weight;
+	if(curUtil > coreSet[maxUtilCoreId].util)
+		curUtil = coreSet[maxUtilCoreId].util;
+
+	DVFS_INFO(("before weight: %f, weight: %f, after weight: %f\n", coreSet[maxUtilCoreId].midUtil, weight, curUtil));
+	avgMidUtil = avgMidUtil + (curUtil - midUtilHistory[midUtilHistoryIndex]) / CONFIG_NUM_OF_HISTORY_ENTRIES;
+	midUtilHistory[midUtilHistoryIndex] = curUtil;
+
+	curFreq = getProperFreq(avgMidUtil);
+	DVFS_INFO(("set frequency to %d\n", curFreq));
+	setFreq(curFreq);
 }
 
 /**
@@ -381,7 +388,7 @@ void setFreq(int freq)
 	}
 	else
 	{
-		fprintf(stderr, "cannot set frequency\n");
+		ERR(("cannot set frequency\n"));
 		destruction();
 		exit(EXIT_FAILURE);
 	}
@@ -395,6 +402,9 @@ void migration(void)
 	if(!CONFIG_TURN_ON_MIGRATION)
 		return;
 	INFO(("migration\n"));
+
+	if(numOfCoresOnline == 1)
+		return;
 
 	// balance importance among cores
 	balanceCoreImp(minImpCoreId, maxImpCoreId);
@@ -439,7 +449,7 @@ static void getFrequencyTable(void)
 		}
 		else
 		{
-			fprintf(stderr, "cannot get frequency table\n");
+			ERR(("cannot get frequency table\n"));
 			destruction();
 			exit(EXIT_FAILURE);
 		}
@@ -455,7 +465,7 @@ static void getFrequencyTable(void)
 		}
 		else
 		{
-			fprintf(stderr, "cannot get frequency table\n");
+			ERR(("cannot get frequency table\n"));
 			destruction();
 			exit(EXIT_FAILURE);
 		}
@@ -487,7 +497,7 @@ static int getCurFreq(void)
 	}
 	else
 	{
-		fprintf(stderr, "cannot fetch cuurent frequency\n");
+		ERR(("cannot fetch current frequency\n"));
 		destruction();
 		exit(EXIT_FAILURE);
 	}
@@ -501,18 +511,26 @@ static int getCurFreq(void)
  *
  * @return frequency level to use
  */
-static int getProperFreq(float util, bool fastUp)
+static int getProperFreq(float util)
 {
 	int candidateFreqLevel = 0;
+	bool fastUp = false;
+	static int up_counter = 0;
 	static int lastFreqLevel = 0;
-	static bool fastUpLock = false;
 
-	if(fastUp && !fastUpLock)
+	if(midUtilHistory[midUtilHistoryIndex] > midUtilHistory[(midUtilHistoryIndex - 1) % CONFIG_NUM_OF_HISTORY_ENTRIES])
+		up_counter++;
+	else
+		up_counter = 0;
+	if(up_counter >= 2)
+	{
+		up_counter = 1;
+		fastUp = true;
+	}
+
+	if(fastUp)
 	{
 		candidateFreqLevel = (lastFreqLevel + numOfFreq - 1) / 2;
-		if(candidateFreqLevel == lastFreqLevel && candidateFreqLevel != numOfFreq - 1)
-			candidateFreqLevel++;
-		fastUpLock = true;
 	}
 	else
 	{
@@ -520,15 +538,13 @@ static int getProperFreq(float util, bool fastUp)
 		{
 			if(freqTable[candidateFreqLevel] > util)
 			{
-				if(midUtilHistory[midUtilHistoryIndex] > midUtilHistory[(midUtilHistoryIndex - 1) % CONFIG_NUM_OF_HISTORY_ENTRIES]) // scale up
+				if(freqTable[candidateFreqLevel] * CONFIG_SCALE_UP_RATIO < util)
 				{
-					if(freqTable[candidateFreqLevel] * CONFIG_SCALE_UP_RATIO < util)
-						candidateFreqLevel++;
+					candidateFreqLevel++;
 				}
 				break;
 			}
 		}
-		fastUpLock = false;
 	}
 
 	lastFreqLevel = candidateFreqLevel;
@@ -548,7 +564,7 @@ static void changeGovernorToUserspace()
 	}
 	else
 	{
-		fprintf(stderr, "cannot set governor to userspace\n");
+		ERR(("cannot set governor to userspace\n"));
 		destruction();
 		exit(EXIT_FAILURE);
 	}
@@ -579,7 +595,7 @@ static int getNumProcessRunning(void)
 	}
 	else
 	{
-		fprintf(stderr, "cannot fetch cuurent number of running\n");
+		ERR(("cannot fetch cuurent number of running\n"));
 		destruction();
 		exit(EXIT_FAILURE);
 	}
@@ -629,21 +645,21 @@ static void setCore(int coreId, bool turnOn)
 		if(turnOn)
 		{
 			fprintf(fp, "1\n");
-			initialize_core(coreId);
 			numOfCoresOnline++;
+			initialize_core(coreId);
 		}
 		else
 		{
 			fprintf(fp, "0\n");
+			numOfCoresOnline--;
 			memset(&coreSet[coreId], 0, sizeof(COREATTR));
 			vector_remove_all(pidListVec[coreId]);
-			numOfCoresOnline--;
 		}
 		fclose(fp);
 	}
 	else
 	{
-		fprintf(stderr, "cannot set core %d on\n", coreId);
+		ERR(("cannot set core %d on\n", coreId));
 		destruction();
 		exit(EXIT_FAILURE);
 	}

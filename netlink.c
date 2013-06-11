@@ -42,7 +42,7 @@ int get_netlink_socket()
 	INFO(("create netlink socket\n"));
     if((nlSock = socket(PF_NETLINK, SOCK_DGRAM, NETLINK_CONNECTOR)) == -1)
 	{
-		fprintf(stderr, "cannot create netlink socket\n");
+		ERR(("cannot create netlink socket\n"));
         return -1;
     }
 
@@ -53,7 +53,7 @@ int get_netlink_socket()
 	INFO(("bind netlink socket\n"));
     if(bind(nlSock, (struct sockaddr *)&sa_nl, sizeof(sa_nl)) == -1)
 	{
-		fprintf(stderr, "cannot bind netlink socket\n");
+		ERR(("cannot bind netlink socket\n"));
         close(nlSock);
         return -1;
     }
@@ -86,7 +86,7 @@ int set_proc_event_listen(int nlSock, bool enable)
 	INFO(("send message, %s\n", enable ? "subscribe proc connector" : "unsubscribe proc connector"));
     if(send(nlSock, &nlcnMsg, sizeof(nlcnMsg), 0) == -1)
 	{
-		fprintf(stderr, "cannot send netlink message\n");
+		ERR(("cannot send netlink message\n"));
         return -1;
     }
 
