@@ -1,0 +1,6 @@
+#Video performance
+Scenario  NATIVE  UCSG
+"M"	      29.812  29.846
+"M+L1"    29.804  29.720
+"M+L2"    29.770  29.688
+"M+L1+L2" 29.678  29.662

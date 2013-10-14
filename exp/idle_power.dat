@@ -1,0 +1,4 @@
+# idle screen on/off energy
+Scenario      NATIVE     UCSG
+"Screen off"  6.7        6.5
+"Screen on"   614        629

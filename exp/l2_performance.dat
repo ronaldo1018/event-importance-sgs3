@@ -1,0 +1,8 @@
+#Zip performance
+Scenario  NATIVE  UCSG
+"L2"      36.8    33.8
+"L1+L2"   53      54
+"M+L2"    39.8    42 
+"M+L1+L2" 31.2    27.8
+"H+L2"    21.4    28
+"H+L1+L2" 33.2    44.4
