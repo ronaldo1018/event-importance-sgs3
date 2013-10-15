@@ -78,6 +78,26 @@ static int sumProcRunning = 0;
 static int avgProcRunning = 0;
 
 /**
+ * @brief record history utilization for fine-grained thread-level dpm
+ */
+static float utilHistory[CONFIG_NUM_OF_HISTORY_ENTRIES];
+
+/**
+ * @brief record last entry index in utilHistory array
+ */
+static int utilHistoryIndex = 0;
+
+/**
+ * @brief summation of utilization history
+ */
+static float sumUtil = 0;
+
+/**
+ * @brief average value of utilization history
+ */
+static float avgUtil = 0;
+
+/**
  * @brief record history mid utilization for fine-grained thread-level dvfs
  */
 static float midUtilHistory[CONFIG_NUM_OF_HISTORY_ENTRIES];
@@ -156,6 +176,7 @@ void initialize_cores(void)
 		procRunningHistory[i] = 1;
 	sumProcRunning = CONFIG_NUM_OF_PROCESS_RUNNING_HISTORY_ENTRIES;
 	memset(midUtilHistory, 0, sizeof(float) * CONFIG_NUM_OF_HISTORY_ENTRIES);
+	memset(utilHistory, 0, sizeof(float) * CONFIG_NUM_OF_HISTORY_ENTRIES);
 }
 
 static void initialize_core(int coreId)
@@ -213,18 +234,24 @@ void DPM(void)
 	sumProcRunning += numOfProcessRunning;
 	avgProcRunning = sumProcRunning / CONFIG_NUM_OF_PROCESS_RUNNING_HISTORY_ENTRIES;
 
-	// get utilization sum
+	// get utilization sum and update table
 	for(i = 0; i < CONFIG_NUM_OF_CORE; i++)
 	{
 		utilSum += coreSet[i].util;
 	}
+
+	utilHistoryIndex = (utilHistoryIndex + 1) % CONFIG_NUM_OF_HISTORY_ENTRIES;
+	sumUtil -= utilHistory[utilHistoryIndex];
+	utilHistory[utilHistoryIndex] = utilSum;
+	sumUtil += utilSum;
+	avgUtil = sumUtil / CONFIG_NUM_OF_HISTORY_ENTRIES;
 	INFO(("utilization sum = %f\n", utilSum));
 
 	// get number of cores that should online
 	for(i = 0; i < CONFIG_NUM_OF_CORE - 1; i++)
 	{
 		//if(Thres[i] * (i+1) > utilSum)
-		if(Thres[i] > utilSum)
+		if(Thres[i] > avgUtil)
 		{
 			break;
 		}
@@ -359,7 +386,7 @@ void DVFS(void)
 
 	// record utilization in history table
 	midUtilHistoryIndex = (midUtilHistoryIndex + 1) % CONFIG_NUM_OF_HISTORY_ENTRIES;
-	weight = 1 + (float)(coreSet[maxUtilCoreId].numOfRunningThreads - coreSet[maxUtilCoreId].numOfRunningMidThreads) / (coreSet[maxUtilCoreId].numOfRunningMidThreads * CONFIG_MID_WEIGHT_OVER_LOW);
+	weight = 1 + (float)(coreSet[maxUtilCoreId].numOfRunningThreads - coreSet[maxUtilCoreId].numOfRunningMidThreads) / ((coreSet[maxUtilCoreId].numOfThreads - coreSet[maxUtilCoreId].numOfMidThreads) + coreSet[maxUtilCoreId].numOfRunningMidThreads * CONFIG_MID_WEIGHT_OVER_LOW);
 	curUtil = coreSet[maxUtilCoreId].midUtil * weight;
 	if(curUtil > coreSet[maxUtilCoreId].util)
 		curUtil = coreSet[maxUtilCoreId].util;
@@ -735,7 +762,7 @@ static void balanceCoreImp(int minCoreId, int maxCoreId)
 static void balanceCoreUtil(int minCoreId, int maxCoreId)
 {
 	int i = 0, length, pid;
-	int avgUtil = (coreSet[minCoreId].util + coreSet[maxCoreId].util) / 2;
+	int halfUtil = (coreSet[minCoreId].util + coreSet[maxCoreId].util) / 2;
 	INFO(("balance util from max core %d util %f to min core %d util %f\n", maxCoreId, coreSet[maxCoreId].util, minCoreId, coreSet[minCoreId].util));
 
 	if(minCoreId == maxCoreId)
@@ -748,7 +775,7 @@ static void balanceCoreUtil(int minCoreId, int maxCoreId)
 	if(length != 0)
 	{
 		pid = ((int *)pidListVec[maxCoreId]->elems)[0];
-		for(i = 0; i < length && coreSet[minCoreId].util + threadSet[pid].util < avgUtil; i++)
+		for(i = 0; i < length && coreSet[minCoreId].util + threadSet[pid].util < halfUtil; i++)
 		{
 			pid = ((int *)pidListVec[maxCoreId]->elems)[i];
 			vector_push(pidListVec[minCoreId], &pid);

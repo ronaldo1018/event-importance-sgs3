@@ -437,6 +437,7 @@ static void produce_importance(NLCN_CNPROC_MSG *cnprocMsg)
 							{
 								activityChangeThrPid = ((int *)becomeBGThrVec->elems)[i];
 								change_importance(activityChangeThrPid, IMPORTANCE_LOW, false);
+								prioritize(importanceChangeThrVec);
 							}
 							
 							length = vector_length(becomeFGThrVec);
@@ -444,6 +445,7 @@ static void produce_importance(NLCN_CNPROC_MSG *cnprocMsg)
 							{
 								activityChangeThrPid = ((int *)becomeFGThrVec->elems)[i];
 								change_importance(activityChangeThrPid, IMPORTANCE_MID, false);
+								prioritize(importanceChangeThrVec);
 							}
 						}
 						check_activity_counter = 0;
@@ -624,6 +626,7 @@ static void cur_activity_importance_to_mid(void)
 
 	INFO(("fg thr to mid\n"));
 	getCurActivityThrs(curActivityThrVec);
+
 	length = vector_length(curActivityThrVec);
 	for(i = 0; i < length; i++)
 	{
