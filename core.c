@@ -28,6 +28,7 @@
 #include "thread.h"
 #include "common.h"
 #include "debug.h"
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -583,6 +584,8 @@ static int getProperFreq(float util)
  */
 static void changeGovernorToUserspace()
 {
+	errno = 0;
+	char buff[BUFF_SIZE];
 	FILE *fp = fopen(GOVERNOR_PATH, "w");
 	if(fp)
 	{
@@ -592,6 +595,8 @@ static void changeGovernorToUserspace()
 	else
 	{
 		ERR(("cannot set governor to userspace\n"));
+		sprintf(buff, "Error %d \n", errno);
+		ERR((buff));
 		destruction();
 		exit(EXIT_FAILURE);
 	}

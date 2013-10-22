@@ -25,6 +25,7 @@
 #include "touch.h"
 #include "config.h"
 #include "common.h"
+#include "debug.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -37,6 +38,8 @@ void initialize_touch(void)
 {
 	char buff[BUFF_SIZE];
 	char tmp[BUFF_SIZE];
+	INFO(("initialize touch\n"));
+
 	if(CONFIG_POLLING_TOUCH_STATUS)
 	{
 		FILE *fp = fopen(TOUCH_INTERRUPT_PATH, "r");
