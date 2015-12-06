@@ -25,7 +25,6 @@
 #include "importance.h"
 #include "config.h"
 #include "netlink.h"
-#include "activity.h"
 #include "touch.h"
 #include "core.h"
 #include "thread.h"
@@ -34,13 +33,16 @@
 #include "parse.h"
 #include "common.h"
 #include "debug.h"
+#include "my_sysinfo.h"
 #include <stdio.h>
 #include <stdlib.h> // exit()
 #include <unistd.h> // getpid()
 #include <errno.h>
 #include <signal.h> // signal(), siginterrupt()
+#include <string.h>
 #include <sys/resource.h> // setpriority()
 #include <sys/socket.h>
+#include <sys/epoll.h>
 
 // global variables
 /**
@@ -86,7 +88,7 @@ vector *importanceChangeThrVec;
 /**
  * @brief store pid list in each core
  */
-vector *pidListVec[CONFIG_NUM_OF_CORE];
+vector **pidListVec;
 
 /**
  * @brief data structure to store thread information
@@ -96,7 +98,7 @@ THREADATTR threadSet[PID_MAX+1];
 /**
  * @brief data structure to store cpu core information
  */
-COREATTR coreSet[CONFIG_NUM_OF_CORE];
+COREATTR *coreSet;
 
 /**
  * @brief minimal utilization core id
@@ -138,6 +140,9 @@ int curFreq;
  */
 int maxFreq = 0;
 
+int epollfd;
+extern int timerfd[N_TIMERS];
+
 // variables or functions only used in this file
 /**
  * @brief flag used to notify whether need to exit
@@ -155,6 +160,8 @@ static void importance_back_to_mid(void);
 static void cur_activity_importance_to_low(void);
 static void cur_activity_importance_to_mid(void);
 static void aging(void);
+static void run_on_foreground_threads(void (*fn)(pid_t));
+static int event_loop();
 
 /**
  * @brief main entry function
@@ -175,8 +182,9 @@ int main(int argc, char **argv)
 	initialize_cores(); // must precede initialize_threads() because we need data structure in initialize_cores() to count utilization
 	initialize_touch();
 	initialize_threads(); // must precede initailize_activity() becaise we need data structure in initialize_threads()
-	initialize_activity();
 	initialize_timer();
+
+    turn_on_timer(TIMER_UTILIZATION_SAMPLING);
 
 	signal(SIGINT, &on_sigint); // catch ctrl+c before stop
 	siginterrupt(SIGINT, true);
@@ -192,7 +200,7 @@ int main(int argc, char **argv)
 		exit(EXIT_FAILURE);
 	}
 
-	if(handle_proc_event() == -1) // listen to events and react
+	if(event_loop() == -1) // listen to events and react
 	{
 		destruction();
 		exit(EXIT_FAILURE);
@@ -239,11 +247,13 @@ void destruction(void)
 	free(becomeFGThrVec);
 	free(curActivityThrVec);
 	free(importanceChangeThrVec);
-	for(i = 0; i < CONFIG_NUM_OF_CORE; i++)
+	for(i = 0; i < my_get_nprocs_conf(); i++)
 	{
 		vector_dispose(pidListVec[i]);
 		free(pidListVec[i]);
 	}
+    free(pidListVec);
+    free(coreSet);
 	destroy_timer();
 	if(nlSock != -1)
 	{
@@ -293,38 +303,34 @@ static int handle_proc_event()
 	NLCN_CNPROC_MSG cnprocMsg;
 	INFO(("handle proc events\n"));
 
-	while(!needExit)
-	{
-		INFO(("wait for message\n"));
-		ret = recv(nlSock, &cnprocMsg, sizeof(cnprocMsg), 0);
+    INFO(("wait for message\n"));
+    ret = recv(nlSock, &cnprocMsg, sizeof(cnprocMsg), 0);
 
-		if(ret == 0)
-		{
-			/* shutdown? */
-			return 0;
-		}
-		else if(ret == -1)
-		{
-			if(errno == EINTR) continue;
-			ERR(("netlink recv error\n"));
-			return -1;
-		}
+    if(ret == 0)
+    {
+        /* shutdown? */
+        return 0;
+    }
+    else if(ret == -1)
+    {
+        ERR(("netlink recv error\n"));
+        return -1;
+    }
 
-		switch(cnprocMsg.proc_ev.what)
-		{
-			case PROC_EVENT_NONE:
-			case PROC_EVENT_EXEC:
-			case PROC_EVENT_UID:
-			case PROC_EVENT_GID:
-			case PROC_EVENT_SID:
-				break; // ignore these events
-			default:
-				vector_remove_all(importanceChangeThrVec);
-				produce_importance(&cnprocMsg); // modify event affected threads
-				do_action(&cnprocMsg); // do the 6 component
-				break;
-		}
-	}
+    switch(cnprocMsg.proc_ev.what)
+    {
+        case PROC_EVENT_NONE:
+        case PROC_EVENT_EXEC:
+        case PROC_EVENT_UID:
+        case PROC_EVENT_GID:
+        case PROC_EVENT_SID:
+            break; // ignore these events
+        default:
+            vector_remove_all(importanceChangeThrVec);
+            produce_importance(&cnprocMsg); // modify event affected threads
+            do_action(&cnprocMsg); // do the 6 component
+            break;
+    }
 	return 0;
 }
 
@@ -345,7 +351,8 @@ static void initialize_data_structures(void)
 	vector_init(becomeFGThrVec, sizeof(int), 0, NULL);
 	vector_init(curActivityThrVec, sizeof(int), 0, NULL);
 	vector_init(importanceChangeThrVec, sizeof(int), 0, NULL);
-	for(i = 0; i < CONFIG_NUM_OF_CORE; i++)
+    pidListVec = (vector**) malloc (sizeof (vector) * my_get_nprocs_conf());
+	for(i = 0; i < my_get_nprocs_conf(); i++)
 	{
 		pidListVec[i] = (vector *)malloc(sizeof(vector));
 		vector_init(pidListVec[i], sizeof(int), 0, NULL);
@@ -355,7 +362,10 @@ static void initialize_data_structures(void)
 	memset(threadSet, 0, sizeof(THREADATTR) * PID_MAX);
 
 	INFO(("initialize COREATTR\n"));
-	memset(coreSet, 0, sizeof(COREATTR) * CONFIG_NUM_OF_CORE);
+    coreSet = (COREATTR*) calloc (my_get_nprocs_conf(), sizeof (COREATTR));
+
+    INFO(("initialize epollfd\n"));
+    epollfd = epoll_create(16);
 }
 
 /**
@@ -365,13 +375,9 @@ static void initialize_data_structures(void)
  */
 static void produce_importance(NLCN_CNPROC_MSG *cnprocMsg)
 {
-	int i;
-	int appearedThrPid, disappearedThrPid, activityChangeThrPid;
+	int appearedThrPid, disappearedThrPid;
 	int parentThrPid;
-	int length;
 	int screen_on;
-	int timer_no;
-	static int check_activity_counter = 0;
 	INFO(("produce importance\n"));
 
 	switch(cnprocMsg->proc_ev.what)
@@ -414,72 +420,6 @@ static void produce_importance(NLCN_CNPROC_MSG *cnprocMsg)
 					ERR(("no such screen event\n"));
 					break;
 			}
-		case TIMER_TICK_EVENT:
-			INFO(("[timer]\n"));
-			// TODO: need to check threads are aging or in touch event, must discard timer change
-			timer_no = cnprocMsg->proc_ev.event_data.timer.timer_no;
-			switch(timer_no)
-			{
-				case 0: // utilization sampling
-					INFO(("timer: timer0 tick\n"));
-
-					// check if activity change
-					check_activity_counter++;
-					if(check_activity_counter >= CONFIG_CHECK_ACTIVITY_TIME)
-					{
-						vector_remove_all(becomeBGThrVec);
-						vector_remove_all(becomeFGThrVec);
-						if(check_activity_change(becomeBGThrVec, becomeFGThrVec))
-						{
-							INFO(("activity: bg/fg change\n"));
-							length = vector_length(becomeBGThrVec);
-							for(i = 0; i < length; i++)
-							{
-								activityChangeThrPid = ((int *)becomeBGThrVec->elems)[i];
-								change_importance(activityChangeThrPid, IMPORTANCE_LOW, false);
-								prioritize(importanceChangeThrVec);
-							}
-							
-							length = vector_length(becomeFGThrVec);
-							for(i = 0; i < length; i++)
-							{
-								activityChangeThrPid = ((int *)becomeFGThrVec->elems)[i];
-								change_importance(activityChangeThrPid, IMPORTANCE_MID, false);
-								prioritize(importanceChangeThrVec);
-							}
-						}
-						check_activity_counter = 0;
-					}
-
-					// check if screen touch if use polling
-					if(CONFIG_POLLING_TOUCH_STATUS)
-					{
-						if(check_screen_touch() && !touchIsOn)
-						{
-							INFO(("screen: touch\n"));
-							touchIsOn = true;
-							importance_mid_to_high();
-						}
-					}
-
-					// aging
-					if(CONFIG_TURN_ON_AGING)
-					{
-						if(agingIsOn)
-							aging();
-					}
-					break;
-				case 1: // temp high
-					INFO(("timer: timer1 tick\n"));
-					importance_back_to_mid();
-					reenable_touch();
-					touchIsOn = false;
-					break;
-				default:
-					ERR(("no such timer_no %d\n", timer_no));
-					break;
-			}
-			break;
 		case TOUCH_EVENT:
 			INFO(("[touch]\n"));
 			touchIsOn = true;
@@ -501,7 +441,6 @@ static void produce_importance(NLCN_CNPROC_MSG *cnprocMsg)
 static void do_action(NLCN_CNPROC_MSG *cnprocMsg)
 {
 	int appearedThrPid;
-	int timer_no;
 	INFO(("do action\n"));
 
 	switch(cnprocMsg->proc_ev.what)
@@ -522,32 +461,6 @@ static void do_action(NLCN_CNPROC_MSG *cnprocMsg)
 				prioritize(importanceChangeThrVec);
 			}
 			break;
-		case TIMER_TICK_EVENT:
-			timer_no = cnprocMsg->proc_ev.event_data.timer.timer_no;
-			switch(timer_no)
-			{
-				case 0: // utilization sampling
-					if(!touchIsOn)
-					{
-						calculate_utilization();
-						DPM();
-						migration();
-						DVFS();
-					}
-					turn_on_sampling_timer();
-					break;
-				case 1: // temp high
-					if(vector_length(importanceChangeThrVec) != 0)
-					{
-						prioritize(importanceChangeThrVec);
-						DVFS();
-					}
-					break;
-				default:
-					ERR(("no such timer_no %d\n", timer_no));
-					break;
-			}
-			break;
 		case TOUCH_EVENT:
 			if(vector_length(importanceChangeThrVec) != 0)
 			{
@@ -561,32 +474,19 @@ static void do_action(NLCN_CNPROC_MSG *cnprocMsg)
 	}
 }
 
+static void importance_mid_to_high_callback(pid_t thread_id)
+{
+    change_importance(thread_id, IMPORTANCE_HIGH, false);
+}
+
 /**
  * @brief importance_mid_to_high let foreground threads becomes high importance after user makes a touch
  */
 static void importance_mid_to_high(void)
 {
-	int i, length;
-	int pid;
-
 	INFO(("fg thr mid to high\n"));
-	getCurActivityThrs(curActivityThrVec);
-	if(vector_length(curActivityThrVec) > 0)
-	{
-		length = vector_length(curActivityThrVec);
-		for(i = 0; i < length; i++)
-		{
-			pid = ((int *)curActivityThrVec->elems)[i];
-			change_importance(pid, IMPORTANCE_HIGH, false);
-		}
-		turn_on_temp_high_timer();
-	}
-	else
-	{
-		ERR(("cannot get current foreground activity threads\n"));
-		destruction();
-		exit(EXIT_FAILURE);
-	}
+
+    run_on_foreground_threads(importance_mid_to_high_callback);
 }
 
 /**
@@ -598,22 +498,24 @@ static void importance_back_to_mid(void)
 	cur_activity_importance_to_mid();
 }
 
+static void cur_activity_importance_to_low_callback(pid_t thread_id)
+{
+    change_importance(thread_id, IMPORTANCE_LOW, false);
+}
+
 /**
  * @brief cur_activity_importance_to_low when foreground threads becomes background threads or screen is off, change foreground thread to low importance
  */
 static void cur_activity_importance_to_low(void)
 {
-	int pid;
-	int i, length;
-
 	INFO(("fg thr to low\n"));
-	getCurActivityThrs(curActivityThrVec);
-	length = vector_length(curActivityThrVec);
-	for(i = 0; i < length; i++)
-	{
-		pid = ((int *)curActivityThrVec->elems)[i];
-		change_importance(pid, IMPORTANCE_LOW, false);
-	}
+    run_on_foreground_threads(cur_activity_importance_to_low_callback);
+}
+
+static void cur_activity_importance_to_mid_callback(pid_t thread_id)
+{
+    INFO(("vector_get %d\n", thread_id));
+    change_importance(thread_id, IMPORTANCE_MID, false);
 }
 
 /**
@@ -621,19 +523,8 @@ static void cur_activity_importance_to_low(void)
  */
 static void cur_activity_importance_to_mid(void)
 {
-	int pid;
-	int i, length;
-
 	INFO(("fg thr to mid\n"));
-	getCurActivityThrs(curActivityThrVec);
-
-	length = vector_length(curActivityThrVec);
-	for(i = 0; i < length; i++)
-	{
-		pid = ((int *)curActivityThrVec->elems)[i];
-		INFO(("vector_get %d\n", pid));
-		change_importance(pid, IMPORTANCE_MID, false);
-	}
+    run_on_foreground_threads(cur_activity_importance_to_mid_callback);
 }
 
 /**
@@ -668,3 +559,94 @@ static void aging(void)
 	}
 }
 
+static void run_on_foreground_threads(void (*fn)(pid_t))
+{
+    FILE *f;
+    pid_t thread_id;
+
+    f = fopen("/dev/cpuctl/apps/tasks", "r");
+    while (fscanf(f, "%d", &thread_id) != EOF)
+    {
+        fn(thread_id);
+    }
+    fclose(f);
+}
+
+static void on_timer_utilization_sampling()
+{
+    INFO(("timer: timer0 tick\n"));
+
+    // check if screen touch if use polling
+    if(CONFIG_POLLING_TOUCH_STATUS)
+    {
+        if(check_screen_touch() && !touchIsOn)
+        {
+            INFO(("screen: touch\n"));
+            touchIsOn = true;
+            importance_mid_to_high();
+        }
+    }
+
+    // aging
+    if(CONFIG_TURN_ON_AGING)
+    {
+        if(agingIsOn)
+            aging();
+    }
+
+    if(!touchIsOn)
+    {
+        calculate_utilization();
+        DPM();
+        migration();
+        DVFS();
+    }
+}
+
+static void on_timer_tmp_high()
+{
+    INFO(("timer: timer1 tick\n"));
+    importance_back_to_mid();
+    reenable_touch();
+    touchIsOn = false;
+
+    if(vector_length(importanceChangeThrVec) != 0)
+    {
+        prioritize(importanceChangeThrVec);
+        DVFS();
+    }
+    turn_off_timer(TIMER_TMP_HIGH);
+}
+
+static int event_loop()
+{
+    struct epoll_event epollev[16];
+    int nfds;
+    int fd;
+    int i;
+    uint64_t exp; // expired time of timerfds
+
+    while (!needExit)
+    {
+        nfds = epoll_wait(epollfd, epollev, 16, -1);
+        INFO(("epoll_wait returned %d events\n", nfds));
+        for (i = 0; i < nfds; i++)
+        {
+            fd = epollev[i].data.fd;
+            if (fd == nlSock) {
+                handle_proc_event();
+            } else if (fd == timerfd[TIMER_UTILIZATION_SAMPLING]) {
+                // TODO: need to check threads are aging or in touch event, must discard timer change
+                read(fd, &exp, sizeof(exp));
+                on_timer_utilization_sampling();
+            } else if (fd == timerfd[TIMER_TMP_HIGH]) {
+                read(fd, &exp, sizeof(exp));
+                on_timer_tmp_high();
+            } else {
+                ERR(("Unknown fd %d from epoll_wait!\n", fd));
+            }
+        }
+    }
+
+    return 0;
+}

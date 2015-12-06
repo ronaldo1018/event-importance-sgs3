@@ -28,16 +28,18 @@
 #include "thread.h"
 #include "common.h"
 #include "debug.h"
+#include "my_sysinfo.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
 #include <sys/syscall.h> // syscall()
+#include <unistd.h>
 
 extern THREADATTR threadSet[];
-extern COREATTR coreSet[];
-extern vector *pidListVec[];
+extern COREATTR* coreSet;
+extern vector **pidListVec;
 extern bool touchIsOn;
 extern float elapseTime;
 extern int curFreq;
@@ -150,7 +152,7 @@ void initialize_cores(void)
 	INFO(("initialize cores\n"));
 
 	// core
-	for(i = 0; i < CONFIG_NUM_OF_CORE; i++)
+	for(i = 0; i < my_get_nprocs_conf(); i++)
 	{
 		// open all cores temporary to know each core's busy and idle
 		sprintf(buff, "/sys/devices/system/cpu/cpu%d/online", i);
@@ -162,7 +164,7 @@ void initialize_cores(void)
 		}
 		initialize_core(i);
 	}
-	numOfCoresOnline = CONFIG_NUM_OF_CORE;
+	numOfCoresOnline = my_get_nprocs_conf();
 	
 	// frequency
 	getFrequencyTable();
@@ -236,7 +238,7 @@ void DPM(void)
 	avgProcRunning = sumProcRunning / CONFIG_NUM_OF_PROCESS_RUNNING_HISTORY_ENTRIES;
 
 	// get utilization sum and update table
-	for(i = 0; i < CONFIG_NUM_OF_CORE; i++)
+	for(i = 0; i < my_get_nprocs_conf(); i++)
 	{
 		utilSum += coreSet[i].util;
 	}
@@ -249,7 +251,7 @@ void DPM(void)
 	INFO(("utilization sum = %f\n", utilSum));
 
 	// get number of cores that should online
-	for(i = 0; i < CONFIG_NUM_OF_CORE - 1; i++)
+	for(i = 0; i < my_get_nprocs_conf() - 1; i++)
 	{
 		//if(Thres[i] * (i+1) > utilSum)
 		if(Thres[i] > avgUtil)
@@ -266,6 +268,7 @@ void DPM(void)
 	numOfCoresShouldOpen -= numOfCoresOnline;
 	while(numOfCoresShouldOpen > 0) // we have to turn on core
 	{
+		INFO(("Trying to open cores\n"));
 		// find candidate core that is not online now
 		candidateCoreId = getFirstOfflineCore();
 		if(candidateCoreId != -1)
@@ -353,7 +356,7 @@ void updateMinMaxCore(void)
 	minImpCoreId = 0;
 	maxImpCoreId = 0;
 
-	for(i = 1; i < CONFIG_NUM_OF_CORE; i++)
+	for(i = 1; i < my_get_nprocs_conf(); i++)
 	{
 		if(coreSet[i].online)
 		{
@@ -644,14 +647,14 @@ static int getFirstOfflineCore(void)
 {
 	int candidateCoreId;
 	// core 0 never offline
-	for(candidateCoreId = 1; candidateCoreId < CONFIG_NUM_OF_CORE; candidateCoreId++)
+	for(candidateCoreId = 1; candidateCoreId < my_get_nprocs_conf(); candidateCoreId++)
 	{
 		if(!coreSet[candidateCoreId].online)
 		{
 			break;
 		}
 	}
-	if(candidateCoreId == CONFIG_NUM_OF_CORE)
+	if(candidateCoreId == my_get_nprocs_conf())
 	{
 		return -1; // no offline core found
 	}
@@ -711,7 +714,7 @@ static int getMinImpCoreExcept0(void)
 	if(minImpCoreId != 0)
 		return minImpCoreId;
 
-	for(i = 1; i < CONFIG_NUM_OF_CORE; i++)
+	for(i = 1; i < my_get_nprocs_conf(); i++)
 	{
 		if(coreSet[i].online)
 		{
@@ -801,7 +804,7 @@ static void PourCoreImpUtil(int victimCoreId)
 	int localMinImpCoreId = 0, localMinUtilCoreId = 0;
 	INFO(("move threads away from core %d\n", victimCoreId));
 
-	for(i = 1; i < CONFIG_NUM_OF_CORE; i++)
+	for(i = 1; i < my_get_nprocs_conf(); i++)
 	{
 		if(coreSet[i].online && i != victimCoreId)
 		{

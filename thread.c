@@ -31,6 +31,7 @@
 #include "parse.h"
 #include "common.h"
 #include "debug.h"
+#include "my_sysinfo.h"
 #include <stdio.h>
 #include <stdlib.h> // atoi()
 #include <ctype.h> // isdigit()
@@ -41,13 +42,13 @@
 #include <sys/resource.h> // setpriority()
 
 extern THREADATTR threadSet[];
-extern COREATTR coreSet[];
+extern COREATTR *coreSet;
 extern int minUtilCoreId;
 extern int maxUtilCoreId;
 extern int minImpCoreId;
 extern int maxImpCoreId;
 extern vector *curActivityThrVec;
-extern vector *pidListVec[];
+extern vector **pidListVec;
 extern float elapseTime;
 extern int curFreq;
 
@@ -173,7 +174,7 @@ void calculate_utilization(void)
 	DVFS_INFO(("calculate utilization\n"));
 
 	// clear coreSet util
-	for(i = 0; i < CONFIG_NUM_OF_CORE; i++)
+	for(i = 0; i < my_get_nprocs_conf(); i++)
 	{
 		coreSet[i].util = 0;
 		coreSet[i].midUtil = 0;
@@ -230,7 +231,7 @@ void calculate_utilization(void)
 	updateMinMaxCore();
 
 	/* use allstat kernel module to update each threads execution time and pid list in each core*/
-	for(i = 0; i < CONFIG_NUM_OF_CORE; i++)
+	for(i = 0; i < my_get_nprocs_conf(); i++)
 	{
 		vector_remove_all(pidListVec[i]);
 	}

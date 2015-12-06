@@ -24,18 +24,18 @@
  */
 #ifndef __TIMER_H__
 #define __TIMER_H__
-#include <stdbool.h>
-#define TIMER0_ENABLE_PATH "/proc/timer_connector/timer0_enable" // util_sample
-#define TIMER1_ENABLE_PATH "/proc/timer_connector/timer1_enable" // temp_high
-#define TIMER0_TIME_PATH "/proc/timer_connector/timer0_time"
-#define TIMER1_TIME_PATH "/proc/timer_connector/timer1_time"
 /*
- * notice: all timers only turn on once, need manually restart
+ * notice: timers trigger repeatedly, need to stop manually
  */
+
+#define N_TIMERS 2
+
+#define TIMER_UTILIZATION_SAMPLING      0
+#define TIMER_TMP_HIGH                  1
 
 void initialize_timer(void);
 void destroy_timer(void);
-void turn_on_sampling_timer(void);
-void turn_on_temp_high_timer(void);
+void turn_on_timer(int timerid);
+void turn_off_timer(int timerid);
 
 #endif // __TIMER_H__

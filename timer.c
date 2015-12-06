@@ -29,57 +29,34 @@
 #include "common.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
+#include <sys/epoll.h>
+#include "mytimerfd.h"
 
 extern bool agingIsOn;
+
+extern int epollfd;
+
+int timerfd[N_TIMERS];
+static struct timespec timerspecs[N_TIMERS];
 
 /**
  * @brief initialize_timer initialize timers for utilization sampling and aging
  */
 void initialize_timer(void)
 {
-	FILE *fp;
+    int i;
+
 	INFO(("initialize timer\n"));
 
-	// initialize timer for utilization sampling
-	fp = fopen(TIMER0_TIME_PATH, "w");
-	if(fp)
-	{
-		fprintf(fp, "%d\n", CONFIG_UTILIZATION_SAMPLING_TIME);
-		fclose(fp);
-	}
-	else
-	{
-		ERR(("cannot setup timer0\n"));
-		destruction();
-		exit(EXIT_FAILURE);
-	}
+    for (i = 0; i < N_TIMERS; i++)
+    {
+        timerfd[i] = my_timerfd_create(CLOCK_REALTIME, 0);
+        timerspecs[i].tv_sec = 0;
+    }
 
-	// initialize timer for temp high
-	fp = fopen(TIMER1_TIME_PATH, "w");
-	if(fp)
-	{
-		fprintf(fp, "%d\n", CONFIG_TMP_HIGH_TIME);
-		fclose(fp);
-	}
-	else
-	{
-		ERR(("cannot setup timer1\n"));
-		destruction();
-		exit(EXIT_FAILURE);
-	}
-
-	fp = fopen(TIMER0_ENABLE_PATH, "w");
-	if(fp)
-	{
-		fprintf(fp, "1\n");
-		fclose(fp);
-	}
-	else
-	{
-		ERR(("cannot setup timer0\n"));
-		destruction();
-		exit(EXIT_FAILURE);
-	}
+    timerspecs[0].tv_nsec = CONFIG_UTILIZATION_SAMPLING_TIME * 1E9;
+    timerspecs[1].tv_nsec = CONFIG_TMP_HIGH_TIME * 1E9;
 
 	if(CONFIG_TURN_ON_AGING)
 		agingIsOn = true;
@@ -90,69 +67,38 @@ void initialize_timer(void)
  */
 void destroy_timer(void)
 {
-	FILE *fp;
 	INFO(("destroy timer\n"));
-
-	fp = fopen(TIMER0_ENABLE_PATH, "w");
-	if(fp)
-	{
-		fprintf(fp, "0\n");
-		fclose(fp);
-	}
-	else
-	{
-		ERR(("cannot stop timer0\n"));
-	}
-
-	fp = fopen(TIMER1_ENABLE_PATH, "w");
-	if(fp)
-	{
-		fprintf(fp, "0\n");
-		fclose(fp);
-	}
-	else
-	{
-		ERR(("cannot stop timer1\n"));
-	}
+    /* Currently do nothing as timers stop as the program ends */
 }
 
-void turn_on_sampling_timer(void)
+void turn_on_timer(int timerid)
 {
-	FILE *fp;
-	INFO(("turn on sampling timer\n"));
+    struct epoll_event epollev;
+    struct timespec now;
+    struct itimerspec timerspec;
 
-	fp = fopen(TIMER0_ENABLE_PATH, "w");
-	if(fp)
-	{
-		fprintf(fp, "1\n");
-		fclose(fp);
-	}
-	else
-	{
-		ERR(("cannot setup timer0\n"));
-		destruction();
-		exit(EXIT_FAILURE);
-	}
+    INFO(("turn on timer %d\n", timerid));
+
+    clock_gettime(CLOCK_REALTIME, &now);
+
+    memcpy(&timerspec.it_value, &now, sizeof(struct timespec));
+    memcpy(&timerspec.it_interval, &timerspecs[timerid], sizeof(struct timespec));
+    my_timerfd_settime(timerfd[timerid], TFD_TIMER_ABSTIME, &timerspec, NULL);
+
+    epollev.data.fd = timerfd[timerid];
+    epollev.events = EPOLLIN;
+    epoll_ctl(epollfd, EPOLL_CTL_ADD, timerfd[timerid], &epollev);
 }
 
-/**
- * @brief turn_on_temp_high_timer turn on temp high timer for foreground threads that temporarily become high
- */
-void turn_on_temp_high_timer(void)
+void turn_off_timer(int timerid)
 {
-	FILE *fp;
-	INFO(("turn on temp high timer\n"));
+    struct itimerspec timerspec;
 
-	fp = fopen(TIMER1_ENABLE_PATH, "w");
-	if(fp)
-	{
-		fprintf(fp, "1\n");
-		fclose(fp);
-	}
-	else
-	{
-		ERR(("cannot setup timer1\n"));
-		destruction();
-		exit(EXIT_FAILURE);
-	}
+    INFO(("turn off timer %d\n", timerid));
+
+    memset(&timerspec.it_value, 0, sizeof(struct timespec));
+
+    my_timerfd_settime(timerfd[timerid], TFD_TIMER_ABSTIME, &timerspec, NULL);
+
+    epoll_ctl(epollfd, EPOLL_CTL_DEL, timerfd[timerid], NULL);
 }
