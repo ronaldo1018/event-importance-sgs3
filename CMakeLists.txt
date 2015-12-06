@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 2.8)
 PROJECT(IMPORTANCE)
 
-ADD_CUSTOM_TARGET(push adb push ../bin/importance /data/local/bin/)
+ADD_CUSTOM_TARGET(push adb push importance /data/local/tmp/importance)
 ADD_CUSTOM_TARGET(exec adb shell su -c "/data/local/bin/importance | tee logs/imp-`date +%G%m%d%H%M`.txt")
 ADD_CUSTOM_TARGET(timer adb shell su -c "insmod /data/local/bin/timer_connector.ko")
 ADD_CUSTOM_TARGET(allstate adb shell su -c "insmod /data/local/bin/allstat_with_name.ko")
