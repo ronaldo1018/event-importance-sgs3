@@ -18,6 +18,7 @@ SET(IMPORTANCE_SRC
 	parse.c
 	debug.c
 	mytimerfd.c
+	my_sysinfo.c
 )
 
 SET(MY_C_FLAGS "-Wall")
