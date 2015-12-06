@@ -17,6 +17,7 @@ SET(IMPORTANCE_SRC
 	vector.c
 	parse.c
 	debug.c
+	mytimerfd.c
 )
 
 SET(MY_C_FLAGS "-Wall")
