@@ -26,6 +26,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <sys/time.h> // gettimeofday()
+#include <android/log.h>
 
 static struct timeval startTime;
 static struct timeval curTime;
@@ -54,5 +55,6 @@ void dbg_printf(const char *fmt, ...)
 
     va_start(args, fmt);
     vfprintf(stderr, fmt, args);
+    __android_log_vprint (ANDROID_LOG_DEBUG, "importance", fmt, args);
     va_end(args);
 }
