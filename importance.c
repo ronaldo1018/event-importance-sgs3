@@ -43,6 +43,7 @@
 #include <sys/resource.h> // setpriority()
 #include <sys/socket.h>
 #include <sys/epoll.h>
+#include <sys/system_properties.h> // __system
 
 // global variables
 /**
@@ -162,6 +163,7 @@ static void cur_activity_importance_to_mid(void);
 static void aging(void);
 static void run_on_foreground_threads(void (*fn)(pid_t));
 static int event_loop();
+static void wait_for_boot_completed();
 
 /**
  * @brief main entry function
@@ -173,6 +175,8 @@ static int event_loop();
  */
 int main(int argc, char **argv)
 {
+    wait_for_boot_completed();
+
 	if(DEBUG_INFO || DEBUG_DVFS_INFO)
 	{
 		initialize_debug();
@@ -649,4 +653,23 @@ static int event_loop()
     }
 
     return 0;
+}
+
+static void wait_for_boot_completed()
+{
+    char prop[PATH_MAX];
+    memset(prop, 0, PATH_MAX);
+    while (true)
+    {
+        if (__system_property_get("sys.boot_completed", prop) > 0)
+        {
+            if (strcmp (prop, "1") == 0)
+            {
+                break;
+            }
+        }
+        INFO(("Waiting for sys.boot_completed\n"));
+        sleep(1);
+        continue;
+    }
 }
