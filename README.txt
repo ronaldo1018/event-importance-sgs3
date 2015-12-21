@@ -4,13 +4,10 @@ Prerequisites:
 2. Rooted phone
 
 How to build:
-1. git clone https://github.com/taka-no-me/android-cmake /opt/android-cmake
-2. cd build
-3. cmake -DCMAKE_TOOLCHAIN_FILE=/opt/android-cmake/android.toolchain.cmake -DANDROID_NDK=/opt/android-ndk -DCMAKE_BUILD_TYPE=Release -DANDROID_ABI="armeabi-v7a with NEON" -DANDROID_NATIVE_API_LEVEL=android-19 ..
-4. make
+ndk-build NDK_PROJECT_PATH=. APP_BUILD_SCRIPT=./Android.mk
 
 How to run:
-1. make push
+1. adb push libs/armeabi/importance /data/local/tmp/
 2. adb shell
 3. cd /data/local/tmp
 4. ./importance
@@ -18,3 +15,12 @@ How to run:
 Problems:
 Cannot create netlink socket: protocol not supported
     Enable connector in kernel config
+
+Shared files:
+include/importance_data.h => gecko/hal/importance_data.h
+include/IImportance.h => gecko/hal/gonk/IImportance.h
+IImportance.cpp => gecko/hal/gonk/IImportance.cpp
+include/frameworks/native/include => frameworks/native/include
+include/system/core/include/ => system/core/include/
+lib/libutils.so => out/target/product/flame/system/lib/libutils.so
+lib/libbinder.so => out/target/product/flame/system/lib/libbinder.so

@@ -24,11 +24,9 @@
  */
 #ifndef __TOUCH_H__
 #define __TOUCH_H__
-#define TOUCH_INTERRUPT_PATH "/proc/interrupts"
 #define TOUCH_REENABLE_PATH "/proc/mms_ts_touch_happen"
 #include <stdbool.h>
 
 void initialize_touch(void);
-bool check_screen_touch(void);
 void reenable_touch(void);
 #endif // __TOUCH_H__

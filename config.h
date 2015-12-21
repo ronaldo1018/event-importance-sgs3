@@ -53,7 +53,4 @@
 #define CONFIG_THRESHOLD3 800000 /* switch threshold of 2 or 3 core, utilsum = 800000 */
 #define CONFIG_THRESHOLD4 1700000 /* switch threshold of 3 or 4 core, utilsum = 1700000 */
 #define CONFIG_NUM_OF_PROCESS_RUNNING_HISTORY_ENTRIES 3
-// touch
-#define CONFIG_POLLING_TOUCH_STATUS 0
-#define CONFIG_TOUCH_INTERRUPT_DRIVER "melfas-ts"
 #endif // __CONFIG_H__

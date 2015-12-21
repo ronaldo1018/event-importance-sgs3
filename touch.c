@@ -28,69 +28,17 @@
 #include "debug.h"
 #include <stdio.h>
 #include <string.h>
-
-static unsigned int lastTouchCount = 0;
+#include <sys/mman.h>
+#include "ImportanceClient.h"
 
 /*
  * get current screen touch counts to initialize lastTouchCount
  */
 void initialize_touch(void)
 {
-	char buff[BUFF_SIZE];
-	char tmp[BUFF_SIZE];
 	INFO(("initialize touch\n"));
 
-	if(CONFIG_POLLING_TOUCH_STATUS)
-	{
-		FILE *fp = fopen(TOUCH_INTERRUPT_PATH, "r");
-		if(fp)
-		{
-			while(fgets(buff, BUFF_SIZE, fp))
-			{
-				if(strstr(buff, CONFIG_TOUCH_INTERRUPT_DRIVER))
-				{
-					sscanf(buff, "%s %d %s", tmp, &lastTouchCount, tmp);
-					break;
-				}
-			}
-			fclose(fp);
-		}
-	}
-	else // event driven touch need to make sure touch happen entry is clear so manual clear it
-	{
-		reenable_touch();
-	}
-}
-
-/*
- * profile current screen touch count and notify the change
- * return true if touch count increase, false otherwise
- */
-bool check_screen_touch(void)
-{
-	char buff[BUFF_SIZE];
-	char tmp[BUFF_SIZE];
-	unsigned int touchCount;
-	bool check = false;
-	FILE *fp = fopen(TOUCH_INTERRUPT_PATH, "r");
-	if(fp)
-	{
-		while(fgets(buff, BUFF_SIZE, fp))
-		{
-			if(strstr(buff, CONFIG_TOUCH_INTERRUPT_DRIVER))
-			{
-				sscanf(buff, "%s %u %s", tmp, &touchCount, tmp);
-				if(touchCount > lastTouchCount)
-				{
-					lastTouchCount = touchCount;
-					check = true;
-				}
-				break;
-			}
-		}
-		fclose(fp);
-	}
-	return check;
+    reenable_touch();
 }
 
 /**
@@ -98,10 +46,5 @@ bool check_screen_touch(void)
  */
 void reenable_touch(void)
 {
-	FILE *fp = fopen(TOUCH_REENABLE_PATH, "w");
-	if(fp)
-	{
-		fprintf(fp, "0\n");
-		fclose(fp);
-	}
+    getSharedData()->touch_enabled = 1;
 }

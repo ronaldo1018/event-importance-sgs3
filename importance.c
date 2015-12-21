@@ -22,6 +22,7 @@
  * @version 20130409
  * @date 2013-04-09
  */
+#include "ImportanceClient.h"
 #include "importance.h"
 #include "config.h"
 #include "netlink.h"
@@ -34,16 +35,18 @@
 #include "common.h"
 #include "debug.h"
 #include "my_sysinfo.h"
+#include "device_events.h"
 #include <stdio.h>
 #include <stdlib.h> // exit()
 #include <unistd.h> // getpid()
 #include <errno.h>
 #include <signal.h> // signal(), siginterrupt()
 #include <string.h>
+#include <limits.h>
 #include <sys/resource.h> // setpriority()
 #include <sys/socket.h>
 #include <sys/epoll.h>
-#include <sys/system_properties.h> // __system
+#include <sys/system_properties.h> // __system_property_get
 
 // global variables
 /**
@@ -184,6 +187,13 @@ int main(int argc, char **argv)
 	initialize_data_structures(); // must be initialize first because other initialize function might use
 	prioritize_self(); // change nice of this process to highest
 	initialize_cores(); // must precede initialize_threads() because we need data structure in initialize_cores() to count utilization
+
+    // Need to connect before initialize touch as touch uses shared memory
+    if (connect_service() != 0)
+    {
+        exit(EXIT_FAILURE);
+    }
+
 	initialize_touch();
 	initialize_threads(); // must precede initailize_activity() becaise we need data structure in initialize_threads()
 	initialize_timer();
@@ -223,6 +233,10 @@ int main(int argc, char **argv)
  */
 void change_importance(int pid, enum IMPORTANCE_VALUE importance, bool firstAssign)
 {
+    if (threadSet[pid].importance == importance)
+    {
+        return;
+    }
 	INFO(("change importance %d to %d\n", pid, importance));
 	int coreId = threadSet[pid].coreId;
 	if(firstAssign)
@@ -370,6 +384,9 @@ static void initialize_data_structures(void)
 
     INFO(("initialize epollfd\n"));
     epollfd = epoll_create(16);
+
+    INFO(("initialize devices events FIFO\n"));
+    initialize_fifo();
 }
 
 /**
@@ -381,7 +398,6 @@ static void produce_importance(NLCN_CNPROC_MSG *cnprocMsg)
 {
 	int appearedThrPid, disappearedThrPid;
 	int parentThrPid;
-	int screen_on;
 	INFO(("produce importance\n"));
 
 	switch(cnprocMsg->proc_ev.what)
@@ -401,40 +417,64 @@ static void produce_importance(NLCN_CNPROC_MSG *cnprocMsg)
 			INFO(("disappeared pid %d imp %d exit\n", disappearedThrPid, threadSet[disappearedThrPid].importance));
 			destroy_thread(disappearedThrPid);
 			break;
-		case SCREEN_EVENT:
-			INFO(("[screen]\n"));
-			screen_on = cnprocMsg->proc_ev.event_data.screen.screen_on;
-			switch(screen_on)
-			{
-				case 0: // screen off
-					INFO(("screen turn off\n"));
-					if(CONFIG_TURN_ON_AGING)
-						agingIsOn = false;
-					cur_activity_importance_to_low();
-					break;
-				case 1: // screen on
-					INFO(("screen turn on\n"));
-					if(CONFIG_TURN_ON_AGING)
-					{
-						agingIsOn = true;
-					}
-					cur_activity_importance_to_mid();
-					break;
-				default:
-					ERR(("no such screen event\n"));
-					break;
-			}
-		case TOUCH_EVENT:
-			INFO(("[touch]\n"));
-			touchIsOn = true;
-			curFreq = maxFreq;
-			setFreq(maxFreq); // early set frequency to highest
-			importance_mid_to_high();
-			break;
 		default:
 			INFO(("unknown event!\n"));
 			break;
 	}
+}
+
+void handle_screen_onoff(int screen_on)
+{
+    INFO(("[screen]\n"));
+
+    // produce importance
+    switch(screen_on)
+    {
+        case 0: // screen off
+            INFO(("screen turn off\n"));
+            if(CONFIG_TURN_ON_AGING)
+                agingIsOn = false;
+            cur_activity_importance_to_low();
+            break;
+        case 1: // screen on
+            INFO(("screen turn on\n"));
+            if(CONFIG_TURN_ON_AGING)
+            {
+                agingIsOn = true;
+            }
+            cur_activity_importance_to_mid();
+            break;
+        default:
+            ERR(("no such screen event\n"));
+            break;
+    }
+
+    // do action
+    if(vector_length(importanceChangeThrVec) != 0) // some threads' importance has changed
+    {
+        DPM();
+        migration();
+        DVFS();
+        prioritize(importanceChangeThrVec);
+    }
+}
+
+void handle_touch()
+{
+    // produce importance
+    INFO(("[touch]\n"));
+    touchIsOn = true;
+    curFreq = maxFreq;
+    setFreq(maxFreq); // early set frequency to highest
+    importance_mid_to_high();
+
+    // do_action
+    if(vector_length(importanceChangeThrVec) != 0)
+    {
+        prioritize(importanceChangeThrVec);
+        //DVFS();
+        // commented out in "refine DVFS policy"
+    }
 }
 
 /**
@@ -455,22 +495,6 @@ static void do_action(NLCN_CNPROC_MSG *cnprocMsg)
 			prioritize(importanceChangeThrVec);
 			break;
 		case PROC_EVENT_EXIT:
-			break;
-		case SCREEN_EVENT:
-			if(vector_length(importanceChangeThrVec) != 0) // some threads' importance has changed
-			{
-				DPM();
-				migration();
-				DVFS();
-				prioritize(importanceChangeThrVec);
-			}
-			break;
-		case TOUCH_EVENT:
-			if(vector_length(importanceChangeThrVec) != 0)
-			{
-				prioritize(importanceChangeThrVec);
-				//DVFS();
-			}
 			break;
 		default:
 			INFO(("unknown event!\n"));
@@ -580,17 +604,6 @@ static void on_timer_utilization_sampling()
 {
     INFO(("timer: timer0 tick\n"));
 
-    // check if screen touch if use polling
-    if(CONFIG_POLLING_TOUCH_STATUS)
-    {
-        if(check_screen_touch() && !touchIsOn)
-        {
-            INFO(("screen: touch\n"));
-            touchIsOn = true;
-            importance_mid_to_high();
-        }
-    }
-
     // aging
     if(CONFIG_TURN_ON_AGING)
     {
@@ -629,6 +642,7 @@ static int event_loop()
     int fd;
     int i;
     uint64_t exp; // expired time of timerfds
+    struct FIFO_DATA fifo_data;
 
     while (!needExit)
     {
@@ -646,8 +660,12 @@ static int event_loop()
             } else if (fd == timerfd[TIMER_TMP_HIGH]) {
                 read(fd, &exp, sizeof(exp));
                 on_timer_tmp_high();
+            } else if (fd == get_fifo_fd()) {
+                read(fd, &fifo_data, sizeof (fifo_data));
+                handle_device_events(fifo_data);
             } else {
                 ERR(("Unknown fd %d from epoll_wait!\n", fd));
+                needExit = true;
             }
         }
     }
@@ -672,4 +690,9 @@ static void wait_for_boot_completed()
         sleep(1);
         continue;
     }
+}
+
+int get_epoll_fd()
+{
+    return epollfd;
 }

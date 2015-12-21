@@ -8,3 +8,14 @@
 
 /build/*
 !/build/.keep
+
+/obj/
+/libs/
+
+# shared files
+/IImportance.cpp
+/include/IImportance.h
+/include/importance_data.h
+/include/system/core/include/
+/include/frameworks/native/include/
+/lib/

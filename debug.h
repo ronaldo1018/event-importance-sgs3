@@ -24,6 +24,11 @@
  */
 #ifndef __DEBUG_H__
 #define __DEBUG_H__
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define DEBUG_ERR 1
 #define DEBUG_INFO 1
 #define DEBUG_DVFS_INFO 1
@@ -32,5 +37,9 @@
 #define DVFS_INFO(x) do { if (DEBUG_DVFS_INFO) dbg_printf x; } while (0)
 void initialize_debug(void);
 void dbg_printf(const char *fmt, ...);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // __DEBUG_H__

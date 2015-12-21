@@ -29,4 +29,9 @@ enum IMPORTANCE_VALUE{IMPORTANCE_LOW = 1, IMPORTANCE_MID = 2, IMPORTANCE_HIGH = 
 
 void change_importance(int pid, enum IMPORTANCE_VALUE importance, bool firstAssign);
 void destruction(void);
+
+int get_epoll_fd();
+void handle_screen_onoff(int screen_on);
+void handle_touch();
+
 #endif // __IMPORTANCE_H__
