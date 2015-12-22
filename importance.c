@@ -467,6 +467,7 @@ void handle_touch()
     curFreq = maxFreq;
     setFreq(maxFreq); // early set frequency to highest
     importance_mid_to_high();
+    turn_on_timer(TIMER_TMP_HIGH);
 
     // do_action
     if(vector_length(importanceChangeThrVec) != 0)

@@ -46,5 +46,6 @@ void initialize_touch(void)
  */
 void reenable_touch(void)
 {
+    INFO(("reenable_touch\n"));
     getSharedData()->touch_enabled = 1;
 }

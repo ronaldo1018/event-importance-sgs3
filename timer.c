@@ -29,6 +29,7 @@
 #include "common.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 #include <sys/epoll.h>
 #include "mytimerfd.h"
@@ -80,6 +81,14 @@ void turn_on_timer(int timerid)
     INFO(("turn on timer %d\n", timerid));
 
     clock_gettime(CLOCK_REALTIME, &now);
+
+    now.tv_nsec += timerspecs[timerid].tv_nsec;
+    now.tv_sec += timerspecs[timerid].tv_sec;
+    if (now.tv_nsec >= 1E9)
+    {
+        now.tv_sec += 1;
+        now.tv_nsec -= 1E9;
+    }
 
     memcpy(&timerspec.it_value, &now, sizeof(struct timespec));
     memcpy(&timerspec.it_interval, &timerspecs[timerid], sizeof(struct timespec));
