@@ -1,5 +1,6 @@
 #include <sys/mman.h>
 #include <pthread.h>
+#include <unistd.h> // sleep()
 #include <binder/IBinder.h>
 #include <binder/Binder.h>
 #include <binder/IServiceManager.h>
@@ -19,12 +20,18 @@ SharedData* shm;
 // Connect to server
 int connect_service()
 {
-    sp<IBinder> binder = defaultServiceManager()->getService(String16("importance"));
-    sp<IImportance> service = interface_cast<IImportance>(binder);
-    if (!service.get())
+    sp<IImportance> service;
+    while (true)
     {
-        ERR(("Failed to connect to importance service!"));
-        return -2;
+        sp<IBinder> binder = defaultServiceManager()->getService(String16("importance"));
+        service = interface_cast<IImportance>(binder);
+        if (service.get())
+        {
+            INFO(("Importance service connected at %p", service.get()));
+            break;
+        }
+        ERR(("Failed to connect to importance service! Retrying..."));
+        sleep(1);
     }
     int fd = service->getFD();
 
@@ -38,7 +45,7 @@ int connect_service()
     return 0;
 }
 
-extern "C" SharedData* getSharedData()
+SharedData* getSharedData()
 {
     return shm;
 }
