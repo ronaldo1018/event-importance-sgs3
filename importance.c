@@ -662,6 +662,7 @@ static int event_loop()
                 on_timer_tmp_high();
             } else if (fd == get_fifo_fd()) {
                 read(fd, &fifo_data, sizeof (fifo_data));
+                vector_remove_all(importanceChangeThrVec);
                 handle_device_events(fifo_data);
             } else {
                 ERR(("Unknown fd %d from epoll_wait!\n", fd));

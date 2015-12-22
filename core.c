@@ -446,13 +446,23 @@ void migration(void)
 	updateMinMaxCore();
 }
 
+static int compar(const void *pa, const void *pb)
+{
+    unsigned long long a = *((unsigned long long*) pa),
+                       b = *((unsigned long long*) pb);
+    if (a < b)
+        return -1;
+    else if (a == b)
+        return 0;
+    else
+        return 1;
+}
 /**
  * @brief getFrequencyTable store all available frequencies in freqTable
  */
 static void getFrequencyTable(void)
 {
 	int i;
-	unsigned long long tmp;
 	FILE *fp;
 	char buff[BUFF_SIZE];
 	char tmpstr[1024] = "";
@@ -469,14 +479,6 @@ static void getFrequencyTable(void)
 				numOfFreq++;
 			}
 			fclose(fp);
-
-			// reverse array because original frequency order is decreasing
-			for(i = 0; i < numOfFreq / 2; i++)
-			{
-				tmp = freqTable[i];
-				freqTable[i] = freqTable[numOfFreq - i - 1];
-				freqTable[numOfFreq - i - 1] = tmp;
-			}
 		}
 		else
 		{
@@ -501,6 +503,8 @@ static void getFrequencyTable(void)
 			exit(EXIT_FAILURE);
 		}
 	}
+    /* on some devices time_in_state table is reversely ordered */
+    qsort (freqTable, numOfFreq, sizeof (freqTable[0]), compar);
 	
 	maxFreq = freqTable[numOfFreq -1];
 
