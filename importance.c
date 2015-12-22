@@ -240,7 +240,7 @@ void change_importance(int pid, enum IMPORTANCE_VALUE importance, bool firstAssi
 	INFO(("change importance %d to %d\n", pid, importance));
 	int coreId = threadSet[pid].coreId;
 	if(firstAssign)
-		coreSet[coreId].sumOfImportance += threadSet[pid].importance;
+		coreSet[coreId].sumOfImportance += importance;
 	else
 		coreSet[coreId].sumOfImportance += importance - threadSet[pid].importance;
 	threadSet[pid].importance = importance;
