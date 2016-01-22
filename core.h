@@ -24,9 +24,11 @@
  */
 #ifndef __CORE_H__
 #define __CORE_H__
-#define MAX_FREQ 20
+#define MAX_FREQ 64
 #define GOVERNOR_PATH "/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor"
 #define FREQ_PATH "/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq"
+#define MIN_FREQ_PATH "/sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq"
+#define MAX_FREQ_PATH "/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq"
 #define FREQ_TABLE_PATH "/sys/devices/system/cpu/cpu0/cpufreq/scaling_available_frequencies"
 #define FREQ_TABLE_TIME_IN_STATE_PATH "/sys/devices/system/cpu/cpu0/cpufreq/stats/time_in_state"
 #define FREQ_SET_PATH "/sys/devices/system/cpu/cpu0/cpufreq/scaling_setspeed"
@@ -37,7 +39,7 @@
 typedef struct _COREATTR
 {
 	bool online;
-	int sumOfImportance;
+	unsigned int sumOfImportance;
 	int numOfThreads;
 	int numOfMidThreads;
 	int numOfRunningThreads;
@@ -54,6 +56,10 @@ void DPM(void);
 void assign_core(int pid, int coreId, bool firstAssign);
 void updateMinMaxCore(void);
 void DVFS(void);
-void setFreq(int freq);
+void setFreq(unsigned long long freq);
 void migration(void);
+
+unsigned long long get_curFreq();
+void set_curFreq(unsigned long long _curFreq);
+unsigned long long get_maxFreq();
 #endif // __CORE_H__

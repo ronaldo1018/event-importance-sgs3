@@ -27,12 +27,17 @@
 #include "importance.h"
 #include "debug.h"
 #include "common.h"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wsign-conversion"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <sys/epoll.h>
+#pragma GCC diagnostic pop
 #include "mytimerfd.h"
+
+#define SEC_TO_NS 1000000000
 
 extern bool agingIsOn;
 
@@ -56,8 +61,8 @@ void initialize_timer(void)
         timerspecs[i].tv_sec = 0;
     }
 
-    timerspecs[0].tv_nsec = CONFIG_UTILIZATION_SAMPLING_TIME * 1E9;
-    timerspecs[1].tv_nsec = CONFIG_TMP_HIGH_TIME * 1E9;
+    timerspecs[0].tv_nsec = CONFIG_UTILIZATION_SAMPLING_TIME * SEC_TO_NS;
+    timerspecs[1].tv_nsec = CONFIG_TMP_HIGH_TIME * SEC_TO_NS;
 
 	if(CONFIG_TURN_ON_AGING)
 		agingIsOn = true;
@@ -84,10 +89,10 @@ void turn_on_timer(int timerid)
 
     now.tv_nsec += timerspecs[timerid].tv_nsec;
     now.tv_sec += timerspecs[timerid].tv_sec;
-    if (now.tv_nsec >= 1E9)
+    if (now.tv_nsec >= SEC_TO_NS)
     {
         now.tv_sec += 1;
-        now.tv_nsec -= 1E9;
+        now.tv_nsec -= SEC_TO_NS;
     }
 
     memcpy(&timerspec.it_value, &now, sizeof(struct timespec));

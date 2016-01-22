@@ -1,4 +1,9 @@
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wsign-conversion"
 #include <unistd.h>
+#pragma GCC diagnostic pop
+
+#include "my_sysinfo.h"
 
 int my_get_nprocs_conf()
 {

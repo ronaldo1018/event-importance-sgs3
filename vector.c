@@ -6,11 +6,15 @@
  * @date 2013-04-09
  */
 #include "vector.h"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wsign-conversion"
 #include <stdio.h>
 #include <stdlib.h>
 #include <ctype.h>
 #include <string.h>
 #include <assert.h>
+#include <limits.h>
+#pragma GCC diagnostic pop
  
 static void vector_swap(void *elemp1, void *elemp2, unsigned int elem_size)
 {
@@ -73,7 +77,7 @@ void vector_insert(vector *v, void *elem, unsigned int index)
 {
 	void *target;
  
-	if ((int) index > -1) {
+	if (index != UINT_MAX) {
 		if (!VECTOR_INBOUNDS(index))
 			return;
 		target = VECTOR_INDEX(index);
@@ -106,7 +110,7 @@ void vector_insert_at(vector *v, void *elem, unsigned int index)
  
 void vector_push(vector *v, void *elem)
 {
-	vector_insert(v, elem, -1);
+	vector_insert(v, elem, UINT_MAX);
 }
  
 void vector_pop(vector *v, void *elem)

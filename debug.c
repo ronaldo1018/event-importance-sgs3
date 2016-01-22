@@ -23,10 +23,18 @@
  * @date 2013-04-09
  */
 #include "debug.h"
+
+#define USE_LOGCAT 0
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wsign-conversion"
 #include <stdarg.h>
 #include <stdio.h>
 #include <sys/time.h> // gettimeofday()
+#if USE_LOGCAT
 #include <android/log.h>
+#endif
+#pragma GCC diagnostic pop
 
 static struct timeval startTime;
 static struct timeval curTime;
@@ -55,6 +63,8 @@ void dbg_printf(const char *fmt, ...)
 
     va_start(args, fmt);
     vfprintf(stderr, fmt, args);
+#if USE_LOGCAT
     __android_log_vprint (ANDROID_LOG_DEBUG, "importance", fmt, args);
+#endif
     va_end(args);
 }

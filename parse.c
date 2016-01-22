@@ -23,8 +23,11 @@
  * @date 2013-04-09
  */
 #include "parse.h"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wsign-conversion"
 #include <stdio.h>
 #include <stdlib.h>
+#pragma GCC diagnostic pop
 #define BUFF_SIZE 256
 
 /**

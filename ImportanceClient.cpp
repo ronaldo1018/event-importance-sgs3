@@ -15,11 +15,12 @@
 
 using namespace android;
 
-SharedData* shm;
+SharedData* shm = NULL;
 
 // Connect to server
 int connect_service()
 {
+#if CONFIG_USE_BINDER
     sp<IImportance> service;
     while (true)
     {
@@ -41,7 +42,8 @@ int connect_service()
         ERR(("mmap of fd %d failed! %d, %s\n", fd, errno, strerror(errno)));
         return -1;
     }
-    INFO(("Memory mapped at 0x%16X\n", shm));
+    INFO(("Memory mapped at 0x%16llX\n", reinterpret_cast<unsigned long long>(shm)));
+#endif
     return 0;
 }
 

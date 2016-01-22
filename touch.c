@@ -26,9 +26,12 @@
 #include "config.h"
 #include "common.h"
 #include "debug.h"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wsign-conversion"
 #include <stdio.h>
 #include <string.h>
 #include <sys/mman.h>
+#pragma GCC diagnostic pop
 #include "ImportanceClient.h"
 
 /*
@@ -47,5 +50,13 @@ void initialize_touch(void)
 void reenable_touch(void)
 {
     INFO(("reenable_touch\n"));
-    getSharedData()->touch_enabled = 1;
+    struct SharedData *shm = getSharedData();
+    if (shm)
+    {
+        getSharedData()->touch_enabled = 1;
+    }
+    else
+    {
+        INFO(("reenable_touch(): SHM not ready yet.\n"));
+    }
 }

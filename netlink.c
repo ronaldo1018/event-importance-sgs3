@@ -24,10 +24,13 @@
  */
 #include "netlink.h" // already include netlink.h, connector.h, cn_proc.h
 #include "debug.h"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wsign-conversion"
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/socket.h>
+#pragma GCC diagnostic pop
 
 /**
  * @brief get_netlink_socket connect to netlink
@@ -48,7 +51,7 @@ int get_netlink_socket()
 
     sa_nl.nl_family = AF_NETLINK;
     sa_nl.nl_groups = CN_IDX_PROC;
-    sa_nl.nl_pid = getpid();
+    sa_nl.nl_pid = (uint32_t) getpid();
 
 	INFO(("bind netlink socket\n"));
     if(bind(nlSock, (struct sockaddr *)&sa_nl, sizeof(sa_nl)) == -1)
@@ -74,7 +77,7 @@ int set_proc_event_listen(int nlSock, bool enable)
 
     memset(&nlcnMsg, 0, sizeof(nlcnMsg));
     nlcnMsg.nl_hdr.nlmsg_len = sizeof(nlcnMsg);
-    nlcnMsg.nl_hdr.nlmsg_pid = getpid();
+    nlcnMsg.nl_hdr.nlmsg_pid = (uint32_t) getpid();
     nlcnMsg.nl_hdr.nlmsg_type = NLMSG_DONE;
 
     nlcnMsg.cn_msg.id.idx = CN_IDX_PROC;

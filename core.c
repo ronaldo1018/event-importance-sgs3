@@ -29,6 +29,9 @@
 #include "common.h"
 #include "debug.h"
 #include "my_sysinfo.h"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wsign-conversion"
+#pragma GCC diagnostic ignored "-Wconversion"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -36,14 +39,16 @@
 #include <string.h>
 #include <sys/syscall.h> // syscall()
 #include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#pragma GCC diagnostic pop
 
 extern THREADATTR threadSet[];
 extern COREATTR* coreSet;
 extern vector **pidListVec;
 extern bool touchIsOn;
 extern float elapseTime;
-extern int curFreq;
-extern int maxFreq;
 extern int minUtilCoreId;
 extern int maxUtilCoreId;
 extern int minImpCoreId;
@@ -58,7 +63,17 @@ static unsigned long long freqTable[MAX_FREQ];
 /**
  * @brief number of frequencies available
  */
-static int numOfFreq = 0;
+static unsigned int numOfFreq = 0;
+
+/**
+ * @brief current cpu frequency
+ */
+static unsigned long long curFreq;
+
+/**
+ * @brief maximum cpu frequency available
+ */
+static unsigned long long maxFreq = 0;
 
 /**
  * @brief record history number of process running
@@ -127,8 +142,8 @@ static int Thres[3] = {CONFIG_THRESHOLD2, CONFIG_THRESHOLD3, CONFIG_THRESHOLD4};
 
 // frequency
 static void getFrequencyTable(void);
-static int getCurFreq(void);
-static int getProperFreq(float util);
+static unsigned long long getCurFreq(void);
+static unsigned long long getProperFreq(float util);
 static void changeGovernorToUserspace(void);
 // process
 static int getNumProcessRunning(void);
@@ -173,7 +188,7 @@ void initialize_cores(void)
 		changeGovernorToUserspace();
 	}
 	curFreq = getCurFreq();
-	INFO(("max frequency = %d\n", maxFreq));
+	INFO(("max frequency = %llu\n", maxFreq));
 
 	for(i = 0; i < CONFIG_NUM_OF_PROCESS_RUNNING_HISTORY_ENTRIES; i++)
 		procRunningHistory[i] = 1;
@@ -305,7 +320,6 @@ void DPM(void)
 void assign_core(int pid, int coreId, bool firstAssign)
 {
 	int oldCoreId;
-	int mask;
 	INFO(("pid %d assign to core %d\n", pid, coreId));
 
 	if(firstAssign)
@@ -341,6 +355,8 @@ void assign_core(int pid, int coreId, bool firstAssign)
 		}
 	}
 	threadSet[pid].coreId = coreId;
+
+	int mask;
 	mask = 1 << coreId;
 	syscall(__NR_sched_setaffinity, pid, sizeof(mask), &mask);
 }
@@ -390,17 +406,32 @@ void DVFS(void)
 
 	// record utilization in history table
 	midUtilHistoryIndex = (midUtilHistoryIndex + 1) % CONFIG_NUM_OF_HISTORY_ENTRIES;
-	weight = 1 + (float)(coreSet[maxUtilCoreId].numOfRunningThreads - coreSet[maxUtilCoreId].numOfRunningMidThreads) / ((coreSet[maxUtilCoreId].numOfThreads - coreSet[maxUtilCoreId].numOfMidThreads) + coreSet[maxUtilCoreId].numOfRunningMidThreads * CONFIG_MID_WEIGHT_OVER_LOW);
+    int numOfRunningLowThreads = coreSet[maxUtilCoreId].numOfRunningThreads - coreSet[maxUtilCoreId].numOfRunningMidThreads;
+    int numOfLowThreads = coreSet[maxUtilCoreId].numOfThreads - coreSet[maxUtilCoreId].numOfMidThreads;
+    int numOfRunningMidThreads = coreSet[maxUtilCoreId].numOfRunningMidThreads;
+
+    // XXX: numOfRunningMidThreads or numOfMidThreads here?
+    if (numOfLowThreads == 0 && numOfRunningMidThreads == 0)
+    {
+        // use the highest frequency if all threads are high (different from the paper)
+        setFreq(maxFreq);
+        return;
+    }
+    DVFS_INFO(("maxUtilCoreId = %d, numOfRunningLowThreads = %d, numOfLowThreads = %d, numOfRunningMidThreads = %d\n",
+                maxUtilCoreId,      numOfRunningLowThreads,      numOfLowThreads, numOfRunningMidThreads));
+	weight = 1 + (float)(numOfRunningLowThreads) / (numOfLowThreads + numOfRunningMidThreads * CONFIG_MID_WEIGHT_OVER_LOW);
 	curUtil = coreSet[maxUtilCoreId].midUtil * weight;
 	if(curUtil > coreSet[maxUtilCoreId].util)
 		curUtil = coreSet[maxUtilCoreId].util;
 
 	DVFS_INFO(("before weight: %f, weight: %f, after weight: %f\n", coreSet[maxUtilCoreId].midUtil, weight, curUtil));
+    DVFS_INFO(("midUtilHistoryIndex = %d\n", midUtilHistoryIndex));
 	avgMidUtil = avgMidUtil + (curUtil - midUtilHistory[midUtilHistoryIndex]) / CONFIG_NUM_OF_HISTORY_ENTRIES;
+    DVFS_INFO(("avgMidUtil = %f\n", avgMidUtil));
 	midUtilHistory[midUtilHistoryIndex] = curUtil;
 
 	curFreq = getProperFreq(avgMidUtil);
-	DVFS_INFO(("set frequency to %d\n", curFreq));
+	DVFS_INFO(("set frequency to %llu\n", curFreq));
 	setFreq(curFreq);
 }
 
@@ -409,13 +440,15 @@ void DVFS(void)
  *
  * @param freq target cpu frequency
  */
-void setFreq(int freq)
+void setFreq(unsigned long long freq)
 {
-	FILE *fp = fopen(FREQ_SET_PATH, "w");
-	if(fp)
+	int fd = open(FREQ_SET_PATH, O_WRONLY);
+	if(fd)
 	{
-		fprintf(fp, "%d\n", freq);
-		fclose(fp);
+        char buf[64];
+		sprintf(buf, "%llu\n", freq);
+        write(fd, buf, strlen(buf));
+        close(fd);
 	}
 	else
 	{
@@ -462,7 +495,7 @@ static int compar(const void *pa, const void *pb)
  */
 static void getFrequencyTable(void)
 {
-	int i;
+	unsigned int i;
 	FILE *fp;
 	char buff[BUFF_SIZE];
 	char tmpstr[1024] = "";
@@ -503,6 +536,7 @@ static void getFrequencyTable(void)
 			exit(EXIT_FAILURE);
 		}
 	}
+    INFO(("%u frequencies in total\n", numOfFreq));
     /* on some devices time_in_state table is reversely ordered */
     qsort (freqTable, numOfFreq, sizeof (freqTable[0]), compar);
 	
@@ -521,13 +555,13 @@ static void getFrequencyTable(void)
  *
  * @return current frequency
  */
-static int getCurFreq(void)
+static unsigned long long getCurFreq(void)
 {
-	int freq;
+	unsigned long long freq;
 	FILE *fp = fopen(FREQ_PATH, "r");
 	if(fp)
 	{
-		fscanf(fp, "%d", &freq);
+		fscanf(fp, "%llu", &freq);
 		fclose(fp);
 	}
 	else
@@ -546,14 +580,18 @@ static int getCurFreq(void)
  *
  * @return frequency level to use
  */
-static int getProperFreq(float util)
+static unsigned long long getProperFreq(float util)
 {
-	int candidateFreqLevel = 0;
+	unsigned int candidateFreqLevel = 0;
 	bool fastUp = false;
 	static int up_counter = 0;
-	static int lastFreqLevel = 0;
+	static unsigned int lastFreqLevel = 0;
 
-	if(midUtilHistory[midUtilHistoryIndex] > midUtilHistory[(midUtilHistoryIndex - 1) % CONFIG_NUM_OF_HISTORY_ENTRIES])
+    int previousIndex = midUtilHistoryIndex - 1;
+    if (previousIndex < 0)
+        previousIndex += CONFIG_NUM_OF_HISTORY_ENTRIES;
+
+	if(midUtilHistory[midUtilHistoryIndex] > midUtilHistory[previousIndex])
 		up_counter++;
 	else
 		up_counter = 0;
@@ -591,23 +629,75 @@ static int getProperFreq(float util)
  */
 static void changeGovernorToUserspace()
 {
+    unsigned long long real_freq = 0;
+
 	errno = 0;
-	char buff[BUFF_SIZE];
 	FILE *fp = fopen(GOVERNOR_PATH, "w");
-	if(fp)
-	{
-		fprintf(fp, "userspace\n");
-		fclose(fp);
-	}
-	else
-	{
-		ERR(("cannot set governor to userspace\n"));
-		sprintf(buff, "Error %d \n", errno);
-		ERR((buff));
-		destruction();
-		exit(EXIT_FAILURE);
-	}
+    if(!fp)
+    {
+        ERR(("cannot set governor to userspace, error %d \n", errno));
+        goto clean_exit;
+    }
+    fprintf(fp, "userspace\n");
+    fclose(fp);
+
+    // setting scaling_min_freq and scaling_max_freq, or scaling_setspeed does not work
+    fp = fopen(MIN_FREQ_PATH, "wb");
+    if(!fp)
+    {
+        ERR(("cannot set minimal available frequency to %llu, error %d\n", freqTable[0], errno));
+        goto clean_exit;
+    }
+    INFO(("Setting minimal frequency to %llu\n", freqTable[0]));
+    fprintf(fp, "%llu\n", freqTable[0]);
+    fclose(fp);
+
+    fp = fopen(MIN_FREQ_PATH, "rb");
+    if(!fp)
+    {
+        ERR(("cannot get minimal available frequency, error %d\n", errno));
+        goto clean_exit;
+    }
+    fscanf(fp, "%llu", &real_freq);
+    fclose(fp);
+
+    if (real_freq != freqTable[0])
+    {
+        ERR(("Minimal frequency should be %llu but actually %llu\n", freqTable[0], real_freq));
+        goto clean_exit;
+    }
+
+    fp = fopen(MAX_FREQ_PATH, "wb");
+    if(!fp)
+    {
+        ERR(("cannot set maximal available frequency to %llu, error %d\n", maxFreq, errno));
+        goto clean_exit;
+    }
+    INFO(("Setting maximal frequency to %llu\n", maxFreq));
+    fprintf(fp, "%llu\n", maxFreq);
+    fclose(fp);
+
+    fp = fopen(MAX_FREQ_PATH, "rb");
+    if(!fp)
+    {
+        ERR(("cannot max minimal available frequency, error %d\n", errno));
+        goto clean_exit;
+    }
+    fscanf(fp, "%llu", &real_freq);
+    fclose(fp);
+
+    if (real_freq != maxFreq)
+    {
+        ERR(("Minimal frequency should be %llu but actually %llu\n", maxFreq, real_freq));
+        goto clean_exit;
+    }
+
 	setFreq(maxFreq);
+    return;
+
+clean_exit:
+    destruction();
+    exit(EXIT_FAILURE);
 }
 
 /**
@@ -741,8 +831,9 @@ static int getMinImpCoreExcept0(void)
  */
 static void balanceCoreImp(int minCoreId, int maxCoreId)
 {
-	int i = 0, length, pid;
-	int avgImportance = (coreSet[minCoreId].sumOfImportance + coreSet[maxCoreId].sumOfImportance) / 2;
+	int pid;
+    unsigned int i, length;
+	unsigned int avgImportance = (coreSet[minCoreId].sumOfImportance + coreSet[maxCoreId].sumOfImportance) / 2;
 	INFO(("balance imp from max core %d imp %d to min core %d imp %d\n", maxCoreId, coreSet[maxCoreId].sumOfImportance, minCoreId, coreSet[minCoreId].sumOfImportance));
 
 	if(minCoreId == maxCoreId)
@@ -773,8 +864,9 @@ static void balanceCoreImp(int minCoreId, int maxCoreId)
  */
 static void balanceCoreUtil(int minCoreId, int maxCoreId)
 {
-	int i = 0, length, pid;
-	int halfUtil = (coreSet[minCoreId].util + coreSet[maxCoreId].util) / 2;
+	unsigned int i = 0, length;
+    int pid;
+	float halfUtil = (coreSet[minCoreId].util + coreSet[maxCoreId].util) / 2;
 	INFO(("balance util from max core %d util %f to min core %d util %f\n", maxCoreId, coreSet[maxCoreId].util, minCoreId, coreSet[minCoreId].util));
 
 	if(minCoreId == maxCoreId)
@@ -804,7 +896,8 @@ static void balanceCoreUtil(int minCoreId, int maxCoreId)
  */
 static void PourCoreImpUtil(int victimCoreId)
 {
-	int i, length, pid;
+	int i, length;
+    int pid;
 	int localMinImpCoreId = 0, localMinUtilCoreId = 0;
 	INFO(("move threads away from core %d\n", victimCoreId));
 
@@ -813,13 +906,13 @@ static void PourCoreImpUtil(int victimCoreId)
 		if(coreSet[i].online && i != victimCoreId)
 		{
 			if(coreSet[i].sumOfImportance < coreSet[localMinImpCoreId].sumOfImportance)
-				localMinImpCoreId = i;
+				localMinImpCoreId = (int) i;
 			if(coreSet[i].util < coreSet[localMinUtilCoreId].util)
-				localMinUtilCoreId = i;
+				localMinUtilCoreId = (int) i;
 		}
 	}
 
-	length = vector_length(pidListVec[victimCoreId]);
+	length = (int) vector_length(pidListVec[victimCoreId]);
 	for(i = 0; i < length; i++)
 	{
 		pid = ((int *)pidListVec[victimCoreId])[i];
@@ -829,4 +922,19 @@ static void PourCoreImpUtil(int victimCoreId)
 			assign_core(pid, localMinUtilCoreId, false);
 	}
 	vector_remove_all(pidListVec[victimCoreId]);
+}
+
+unsigned long long get_curFreq()
+{
+    return curFreq;
+}
+
+void set_curFreq(unsigned long long _curFreq)
+{
+    curFreq = _curFreq;
+}
+
+unsigned long long get_maxFreq()
+{
+    return maxFreq;
 }

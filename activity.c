@@ -26,11 +26,14 @@
 #include "thread.h"
 #include "common.h"
 #include "debug.h"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wsign-conversion"
 #include <stdio.h>
 #include <stdlib.h> // atoi()
 #include <ctype.h> // isdigit()
 #include <string.h>
 #include <dirent.h> // opendir(), readdir(), closedir()
+#pragma GCC diagnostic pop
 
 extern THREADATTR threadSet[];
 extern vector *curActivityThrVec;
@@ -49,7 +52,7 @@ static void putThreadGroupToVector(vector *threadGroup, int pid);
  */
 void initialize_activity(void)
 {
-	int i, length;
+	unsigned int i, length;
 	int pid;
 	INFO(("initialize activity\n"));
 

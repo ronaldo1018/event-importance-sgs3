@@ -103,14 +103,6 @@ struct proc_event {
 			__kernel_pid_t process_tgid;
 			__u32 exit_code, exit_signal;
 		} exit;
-
-		struct screen_event { // EVENTIMP
-			__u32 screen_on;
-		} screen;
-
-		struct timer_tick_event { // EVENTIMP
-			__u32 timer_no;
-		} timer;
 	} event_data;
 };
 
@@ -121,9 +113,6 @@ void proc_exec_connector(struct task_struct *task);
 void proc_id_connector(struct task_struct *task, int which_id);
 void proc_sid_connector(struct task_struct *task);
 void proc_exit_connector(struct task_struct *task);
-void screen_connector(int screen_on); // EVENTIMP
-void timer_tick_connector(int timer_no); // EVENTIMP
-void touch_connector(void); // EVENTIMP
 #else
 static inline void proc_fork_connector(struct task_struct *task)
 {}
@@ -141,14 +130,6 @@ static inline void proc_sid_connector(struct task_struct *task)
 static inline void proc_exit_connector(struct task_struct *task)
 {}
 
-static inline void screen_connector(int screen_on) // EVENTIMP
-{}
-
-static inline void timer_tick_connector(int timer_no) // EVENTIMP
-{}
-
-static inline void touch_connector(void) // EVENTIMP
-{}
 #endif	/* CONFIG_PROC_EVENTS */
 #endif	/* __KERNEL__ */
 #endif	/* CN_PROC_H */

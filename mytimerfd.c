@@ -1,6 +1,9 @@
 #include "mytimerfd.h"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wsign-conversion"
 #include <unistd.h>
 #include <sys/syscall.h>
+#pragma GCC diagnostic pop
 
 int my_timerfd_create(int clockid, int flags)
 {

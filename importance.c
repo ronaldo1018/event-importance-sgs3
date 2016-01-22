@@ -36,6 +36,8 @@
 #include "debug.h"
 #include "my_sysinfo.h"
 #include "device_events.h"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wsign-conversion"
 #include <stdio.h>
 #include <stdlib.h> // exit()
 #include <unistd.h> // getpid()
@@ -47,6 +49,7 @@
 #include <sys/socket.h>
 #include <sys/epoll.h>
 #include <sys/system_properties.h> // __system_property_get
+#pragma GCC diagnostic pop
 
 // global variables
 /**
@@ -133,16 +136,6 @@ int lastAgingPid = 1;
  * @brief elapse time since last utilization calculation
  */
 float elapseTime;
-
-/**
- * @brief current cpu frequency
- */
-int curFreq;
-
-/**
- * @brief maximum cpu frequency available
- */
-int maxFreq = 0;
 
 int epollfd;
 extern int timerfd[N_TIMERS];
@@ -265,6 +258,7 @@ void destruction(void)
 	free(becomeFGThrVec);
 	free(curActivityThrVec);
 	free(importanceChangeThrVec);
+
 	for(i = 0; i < my_get_nprocs_conf(); i++)
 	{
 		vector_dispose(pidListVec[i]);
@@ -285,10 +279,11 @@ void destruction(void)
  */
 static void prioritize_self(void)
 {
-	int ret;
+	int ret = -1;
 	INFO(("prioritize self\n"));
 
-	ret = setpriority(PRIO_PROCESS, getpid(), -20); // let this method to have the highest priority
+	// ret = setpriority(PRIO_PROCESS, getpid(), -20); // let this method to have the highest priority
+    ret = 0;
 	INFO(("pid = %d, ret = %d\n", getpid(), ret));
 	if(ret)
 	{
@@ -369,7 +364,7 @@ static void initialize_data_structures(void)
 	vector_init(becomeFGThrVec, sizeof(int), 0, NULL);
 	vector_init(curActivityThrVec, sizeof(int), 0, NULL);
 	vector_init(importanceChangeThrVec, sizeof(int), 0, NULL);
-    pidListVec = (vector**) malloc (sizeof (vector) * my_get_nprocs_conf());
+    pidListVec = (vector**) malloc (sizeof (vector) * (unsigned int) my_get_nprocs_conf());
 	for(i = 0; i < my_get_nprocs_conf(); i++)
 	{
 		pidListVec[i] = (vector *)malloc(sizeof(vector));
@@ -380,13 +375,15 @@ static void initialize_data_structures(void)
 	memset(threadSet, 0, sizeof(THREADATTR) * PID_MAX);
 
 	INFO(("initialize COREATTR\n"));
-    coreSet = (COREATTR*) calloc (my_get_nprocs_conf(), sizeof (COREATTR));
+    coreSet = (COREATTR*) calloc ((unsigned int) my_get_nprocs_conf(), sizeof (COREATTR));
 
     INFO(("initialize epollfd\n"));
     epollfd = epoll_create(16);
 
+#if CONFIG_USE_FIFO
     INFO(("initialize devices events FIFO\n"));
     initialize_fifo();
+#endif
 }
 
 /**
@@ -464,8 +461,8 @@ void handle_touch()
     // produce importance
     INFO(("[touch]\n"));
     touchIsOn = true;
-    curFreq = maxFreq;
-    setFreq(maxFreq); // early set frequency to highest
+    set_curFreq(get_maxFreq());
+    setFreq(get_maxFreq()); // early set frequency to highest
     importance_mid_to_high();
     turn_on_timer(TIMER_TMP_HIGH);
 

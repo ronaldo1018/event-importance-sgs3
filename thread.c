@@ -32,6 +32,9 @@
 #include "common.h"
 #include "debug.h"
 #include "my_sysinfo.h"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wsign-conversion"
+#pragma GCC diagnostic ignored "-Wconversion"
 #include <stdio.h>
 #include <stdlib.h> // atoi()
 #include <ctype.h> // isdigit()
@@ -40,6 +43,7 @@
 #include <sys/time.h> // gettimeofday()
 #include <sys/stat.h> // stat()
 #include <sys/resource.h> // setpriority()
+#pragma GCC diagnostic pop
 
 extern THREADATTR threadSet[];
 extern COREATTR *coreSet;
@@ -50,7 +54,6 @@ extern int maxImpCoreId;
 extern vector *curActivityThrVec;
 extern vector **pidListVec;
 extern float elapseTime;
-extern int curFreq;
 
 // variables or functions only used in this file
 /**
@@ -163,7 +166,8 @@ void destroy_thread(int pid)
  */
 void calculate_utilization(void)
 {
-	int i, pid;
+	int i;
+    int pid;
 	float execTime;
 	FILE *fp;
 	int coreId;
@@ -184,7 +188,7 @@ void calculate_utilization(void)
 
 	// update timestamp
 	gettimeofday(&t, &timez);
-	elapseTime = t.tv_sec - oldTime.tv_sec + (float)(t.tv_usec - oldTime.tv_usec) / 1000000.0;
+	elapseTime = t.tv_sec - oldTime.tv_sec + (float)(t.tv_usec - oldTime.tv_usec) / 1000000.0f;
 	DVFS_INFO(("elapseTime = %f\n", elapseTime));
 	oldTime.tv_sec = t.tv_sec;
 	oldTime.tv_usec = t.tv_usec;
@@ -211,8 +215,8 @@ void calculate_utilization(void)
 				}
 				else
 				{
-					coreSet[coreId].util = (float)(busysub) / (busysub + idlesub) * curFreq;
-					coreSet[coreId].midUtil = (float)(busysub - nice_busysub) / (busysub + idlesub) * curFreq;
+					coreSet[coreId].util = (float)(busysub) / (busysub + idlesub) * get_curFreq();
+					coreSet[coreId].midUtil = (float)(busysub - nice_busysub) / (busysub + idlesub) * get_curFreq();
 				}
 				INFO(("core %d: util %f midUtil %f\n", coreId, coreSet[coreId].util, coreSet[coreId].midUtil));
 				coreSet[coreId].busy = busy;
@@ -243,7 +247,7 @@ void calculate_utilization(void)
 		{
 			sscanf(buff, "%d %f", &pid, &execTime);
 			vector_push(pidListVec[i], &pid);
-			threadSet[pid].util = (execTime - threadSet[pid].execTime) * curFreq;
+			threadSet[pid].util = (execTime - threadSet[pid].execTime) * get_curFreq();
 			if(threadSet[pid].util != 0)
 			{
 				coreSet[threadSet[pid].coreId].numOfRunningThreads++;
@@ -285,8 +289,8 @@ void allocation(int pid)
  */
 void prioritize(vector *importanceChangeThrVec)
 {
-	int i, length, ret;
-	int pid;
+	unsigned int i, length;
+	int ret, pid;
 	if(!CONFIG_TURN_ON_PRIORITIZE)
 		return;
 	INFO(("prioritize\n"));

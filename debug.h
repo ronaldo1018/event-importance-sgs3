@@ -36,7 +36,14 @@ extern "C" {
 #define INFO(x) do { if (DEBUG_INFO) dbg_printf x; } while (0)
 #define DVFS_INFO(x) do { if (DEBUG_DVFS_INFO) dbg_printf x; } while (0)
 void initialize_debug(void);
-void dbg_printf(const char *fmt, ...);
+
+#ifdef __GNUC__
+#define PRINTF_FORMAT_ATTRIBUTE __attribute__((format (printf, 1, 2)))
+#else
+#define PRINTF_FORMAT_ATTRIBUTE
+#endif
+
+void dbg_printf(const char *fmt, ...) PRINTF_FORMAT_ATTRIBUTE;
 
 #ifdef __cplusplus
 }
