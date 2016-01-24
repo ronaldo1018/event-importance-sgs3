@@ -246,7 +246,7 @@ void calculate_utilization(void)
 		while(fgets(buff, BUFF_SIZE, fp))
 		{
 			sscanf(buff, "%d %f", &pid, &execTime);
-			vector_push(pidListVec[i], &pid);
+			vector_push(pidListVec[threadSet[pid].coreId], &pid);
 			threadSet[pid].util = (execTime - threadSet[pid].execTime) * get_curFreq();
 			if(threadSet[pid].util != 0)
 			{
