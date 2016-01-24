@@ -364,7 +364,7 @@ static void initialize_data_structures(void)
 	vector_init(becomeFGThrVec, sizeof(int), 0, NULL);
 	vector_init(curActivityThrVec, sizeof(int), 0, NULL);
 	vector_init(importanceChangeThrVec, sizeof(int), 0, NULL);
-    pidListVec = (vector**) malloc (sizeof (vector) * (unsigned int) my_get_nprocs_conf());
+    pidListVec = (vector**) malloc (sizeof (vector*) * (unsigned int) my_get_nprocs_conf());
 	for(i = 0; i < my_get_nprocs_conf(); i++)
 	{
 		pidListVec[i] = (vector *)malloc(sizeof(vector));
