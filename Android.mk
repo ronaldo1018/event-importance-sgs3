@@ -8,7 +8,10 @@ LOCAL_C_INCLUDES += \
 	$(LOCAL_PATH)/include/system/core/include
 
 LOCAL_LDLIBS += -L$(LOCAL_PATH)/lib -llog -lutils -lbinder
-LOCAL_CFLAGS += -Wall -Wextra -Wconversion -Werror -Wno-error=unused-parameter -Wno-error=conversion
+LOCAL_CFLAGS += -g -Wall -Wextra -Wconversion -Werror -Wno-error=unused-parameter -Wno-error=conversion
+
+# for debugging
+cmd-strip=
 
 LOCAL_SRC_FILES := \
 	importance.c \
