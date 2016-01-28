@@ -163,7 +163,6 @@ void initialize_cores(void)
 {
 	int i;
 	char buff[BUFF_SIZE];
-	FILE *fp;
 	INFO(("initialize cores\n"));
 
 	// core
@@ -171,12 +170,27 @@ void initialize_cores(void)
 	{
 		// open all cores temporary to know each core's busy and idle
 		sprintf(buff, "/sys/devices/system/cpu/cpu%d/online", i);
-		fp = fopen(buff, "w");
-		if(fp)
+		int fd = open(buff, O_WRONLY);
+		if(!fd < 0)
 		{
-			fprintf(fp, "1\n");
-			fclose(fp);
-		}
+            ERR(("Failed to open 'online' file for CPU %d, errno = %d\n", i, errno));
+            // Occasional fails on Foxconn's pad
+            if(CONFIG_FAIL_WHEN_OPEN_CORES_FAIL)
+            {
+                destruction();
+                exit(EXIT_FAILURE);
+            }
+        }
+        if (write(fd, "1\n", 2) < 0)
+        {
+            ERR(("Failed to turn CPU %d on, errno = %d\n", i, errno));
+            if(CONFIG_FAIL_WHEN_OPEN_CORES_FAIL)
+            {
+                destruction();
+                exit(EXIT_FAILURE);
+            }
+        }
+        close(fd);
 		initialize_core(i);
 	}
 	numOfCoresOnline = my_get_nprocs_conf();
@@ -442,20 +456,31 @@ void DVFS(void)
  */
 void setFreq(unsigned long long freq)
 {
-	int fd = open(FREQ_SET_PATH, O_WRONLY);
-	if(fd)
+    char buf[64];
+    sprintf(buf, "%llu\n", freq);
+
+	int fd = open(MIN_FREQ_PATH, O_WRONLY);
+	if(fd < 0)
 	{
-        char buf[64];
-		sprintf(buf, "%llu\n", freq);
-        write(fd, buf, strlen(buf));
-        close(fd);
+        goto error;
 	}
-	else
-	{
-		ERR(("cannot set frequency\n"));
-		destruction();
-		exit(EXIT_FAILURE);
-	}
+
+    write(fd, buf, strlen(buf));
+    close(fd);
+
+    fd = open(MAX_FREQ_PATH, O_WRONLY);
+    if(fd < 0)
+    {
+        goto error;
+    }
+    write(fd, buf, strlen(buf));
+    close(fd);
+    return;
+
+error:
+    ERR(("cannot set frequency\n"));
+    destruction();
+    exit(EXIT_FAILURE);
 }
 
 /**
