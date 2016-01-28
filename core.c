@@ -788,35 +788,42 @@ static int getFirstOfflineCore(void)
  */
 static void setCore(int coreId, bool turnOn)
 {
-	FILE *fp;
+	int fd = -1;
 	char buff[BUFF_SIZE];
 	INFO(("core %d is now %s\n", coreId, turnOn ? "online":"offline"));
 
 	sprintf(buff, "/sys/devices/system/cpu/cpu%d/online", coreId);
-	fp = fopen(buff, "w");
-	if(fp)
+	fd = open(buff, O_WRONLY);
+	if(fd < 0)
 	{
-		if(turnOn)
-		{
-			fprintf(fp, "1\n");
-			numOfCoresOnline++;
-			initialize_core(coreId);
-		}
-		else
-		{
-			fprintf(fp, "0\n");
-			numOfCoresOnline--;
-			memset(&coreSet[coreId], 0, sizeof(COREATTR));
-			vector_remove_all(pidListVec[coreId]);
-		}
-		fclose(fp);
-	}
-	else
-	{
-		ERR(("cannot set core %d on\n", coreId));
-		destruction();
-		exit(EXIT_FAILURE);
-	}
+        goto error;
+    }
+    if(turnOn)
+    {
+        if (write(fd, "1\n", 2) < 0)
+        {
+            goto error;
+        }
+        numOfCoresOnline++;
+        initialize_core(coreId);
+    }
+    else
+    {
+        if (write(fd, "0\n", 2) < 0)
+        {
+            goto error;
+        }
+        numOfCoresOnline--;
+        memset(&coreSet[coreId], 0, sizeof(COREATTR));
+        vector_remove_all(pidListVec[coreId]);
+    }
+    close(fd);
+    return;
+
+error:
+    ERR(("cannot set core %d on\n", coreId));
+    destruction();
+    exit(EXIT_FAILURE);
 }
 
 /**
