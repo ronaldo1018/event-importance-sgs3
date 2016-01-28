@@ -55,7 +55,7 @@
 /**
  * @brief file description id that opens netlink connection
  */
-int nlSock = -1;
+static int nlSock = -1;
 
 /**
  * @brief whether aging mechanism is on
@@ -196,16 +196,19 @@ int main(int argc, char **argv)
 	signal(SIGINT, &on_sigint); // catch ctrl+c before stop
 	siginterrupt(SIGINT, true);
 
-	if((nlSock = get_netlink_socket()) == -1) // retrieve a netlink socket
-	{
-		exit(EXIT_FAILURE);
-	}
+    if(CONFIG_USE_CONNECTOR)
+    {
+        if((nlSock = get_netlink_socket()) == -1) // retrieve a netlink socket
+        {
+            exit(EXIT_FAILURE);
+        }
 
-	if(set_proc_event_listen(nlSock, true) == -1) // subscribe proc events
-	{
-		close(nlSock);
-		exit(EXIT_FAILURE);
-	}
+        if(set_proc_event_listen(nlSock, true) == -1) // subscribe proc events
+        {
+            close(nlSock);
+            exit(EXIT_FAILURE);
+        }
+    }
 
 	if(event_loop() == -1) // listen to events and react
 	{
@@ -649,7 +652,7 @@ static int event_loop()
         for (i = 0; i < nfds; i++)
         {
             fd = epollev[i].data.fd;
-            if (fd == nlSock) {
+            if (CONFIG_USE_CONNECTOR && fd == nlSock) {
                 handle_proc_event();
             } else if (fd == timerfd[TIMER_UTILIZATION_SAMPLING]) {
                 // TODO: need to check threads are aging or in touch event, must discard timer change
