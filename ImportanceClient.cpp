@@ -5,6 +5,7 @@
 #include <binder/Binder.h>
 #include <binder/IServiceManager.h>
 #include <binder/Parcel.h>
+#include "config.h"
 #include "debug.h"
 #include "IImportance.h"
 #include "ImportanceClient.h"
@@ -20,7 +21,11 @@ SharedData* shm = NULL;
 // Connect to server
 int connect_service()
 {
-#if CONFIG_USE_BINDER
+    if(!CONFIG_USE_BINDER)
+    {
+        return 0;
+    }
+    INFO(("connect to importance service\n"));
     sp<IImportance> service;
     while (true)
     {
@@ -43,7 +48,6 @@ int connect_service()
         return -1;
     }
     INFO(("Memory mapped at 0x%16llX\n", reinterpret_cast<unsigned long long>(shm)));
-#endif
     return 0;
 }
 
