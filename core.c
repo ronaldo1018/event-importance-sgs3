@@ -947,7 +947,7 @@ static void PourCoreImpUtil(int victimCoreId)
 	length = (int) vector_length(pidListVec[victimCoreId]);
 	for(i = 0; i < length; i++)
 	{
-		pid = ((int *)pidListVec[victimCoreId])[i];
+		pid = ((int *)pidListVec[victimCoreId]->elems)[i];
 		if(threadSet[pid].importance >= IMPORTANCE_MID) // use importance sum to determine which core to pour
 			assign_core(pid, localMinImpCoreId, false);
 		else // importance = IMPORTANCE_LOW, use utilization sum to determine which core to pour
