@@ -66,8 +66,8 @@ static struct timeval oldTime;
  */
 void initialize_threads(void)
 {
-	DIR *d;
-	struct dirent *de;
+	DIR *d, *process_d;
+	struct dirent *de, *thread_de;
 	FILE *fp;
 	char buff[BUFF_SIZE];
 	struct timezone timez;
@@ -82,8 +82,16 @@ void initialize_threads(void)
 		{
 			if(isdigit(de->d_name[0]))
 			{
-				pid = atoi(de->d_name);
-				initialize_thread(pid);
+                sprintf(buff, "/proc/%d/task", atoi(de->d_name));
+                if((process_d = opendir(buff)) != NULL)
+                {
+                    while((thread_de = readdir(process_d)) != 0)
+                    {
+                        pid = atoi(thread_de->d_name);
+                        initialize_thread(pid);
+                    }
+                    closedir(process_d);
+                }
 			}
 		}
 		closedir(d);
