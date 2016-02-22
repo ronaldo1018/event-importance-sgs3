@@ -256,9 +256,17 @@ void calculate_utilization(void)
 	{
 		while(fgets(buff, BUFF_SIZE, fp))
 		{
+            float execTimeDifference;
 			sscanf(buff, "%d %f", &pid, &execTime);
 			vector_push(pidListVec[threadSet[pid].coreId], &pid);
-			threadSet[pid].util = (execTime - threadSet[pid].execTime) * get_curFreq();
+            execTimeDifference = execTime - threadSet[pid].execTime;
+            // FIXME why kernel reports decreasing execution time?
+            if (execTimeDifference < 0)
+            {
+                ERR(("Negative execution time %f by pid %d\n", execTimeDifference, pid));
+                continue;
+            }
+			threadSet[pid].util = execTimeDifference * get_curFreq();
             threadSet[pid].execTime = execTime;
 			if(threadSet[pid].util != 0)
 			{
