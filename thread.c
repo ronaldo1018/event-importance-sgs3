@@ -259,6 +259,7 @@ void calculate_utilization(void)
 			sscanf(buff, "%d %f", &pid, &execTime);
 			vector_push(pidListVec[threadSet[pid].coreId], &pid);
 			threadSet[pid].util = (execTime - threadSet[pid].execTime) * get_curFreq();
+            threadSet[pid].execTime = execTime;
 			if(threadSet[pid].util != 0)
 			{
 				coreSet[threadSet[pid].coreId].numOfRunningThreads++;
