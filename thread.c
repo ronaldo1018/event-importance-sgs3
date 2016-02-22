@@ -71,7 +71,7 @@ void initialize_threads(void)
 	FILE *fp;
 	char buff[BUFF_SIZE];
 	struct timezone timez;
-	int pid;
+	int pid, tid;
 	float execTime;
 	INFO(("initialize threads\n"));
 
@@ -82,16 +82,19 @@ void initialize_threads(void)
 		{
 			if(isdigit(de->d_name[0]))
 			{
-                sprintf(buff, "/proc/%d/task", atoi(de->d_name));
-                if((process_d = opendir(buff)) != NULL)
+                pid = atoi(de->d_name);
+                sprintf(buff, "/proc/%d/task", pid);
+                process_d = opendir(buff);
+                if (!process_d)
                 {
-                    while((thread_de = readdir(process_d)) != 0)
-                    {
-                        pid = atoi(thread_de->d_name);
-                        initialize_thread(pid);
-                    }
-                    closedir(process_d);
+                    ERR(("Unable to find threads for process %d\n", pid));
                 }
+                while((thread_de = readdir(process_d)) != 0)
+                {
+                    tid = atoi(thread_de->d_name);
+                    initialize_thread(tid);
+                }
+                closedir(process_d);
 			}
 		}
 		closedir(d);
