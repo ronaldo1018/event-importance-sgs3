@@ -32,9 +32,11 @@ extern "C" {
 #define DEBUG_ERR 1
 #define DEBUG_INFO 1
 #define DEBUG_DVFS_INFO 1
+#define DEBUG_MIGRATION_INFO 1
 #define ERR(x) do { if (DEBUG_ERR) dbg_printf x; } while (0)
 #define INFO(x) do { if (DEBUG_INFO) dbg_printf x; } while (0)
 #define DVFS_INFO(x) do { if (DEBUG_DVFS_INFO) dbg_printf x; } while (0)
+#define MIGRATION_INFO(x) do { if (DEBUG_MIGRATION_INFO) dbg_printf x; } while (0)
 void initialize_debug(void);
 
 #ifdef __GNUC__

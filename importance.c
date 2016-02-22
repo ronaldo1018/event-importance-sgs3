@@ -173,7 +173,7 @@ int main(int argc, char **argv)
 {
     wait_for_boot_completed();
 
-	if(DEBUG_INFO || DEBUG_DVFS_INFO)
+	if(DEBUG_INFO || DEBUG_DVFS_INFO || DEBUG_MIGRATION_INFO)
 	{
 		initialize_debug();
 	}

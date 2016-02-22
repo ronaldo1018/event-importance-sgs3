@@ -334,36 +334,56 @@ void DPM(void)
 void assign_core(int pid, int coreId, bool firstAssign)
 {
 	int oldCoreId;
-	INFO(("pid %d assign to core %d\n", pid, coreId));
+    if (!firstAssign)
+    {
+		oldCoreId = threadSet[pid].coreId;
+        MIGRATION_INFO(("pid %d assign from core %d to core %d\n", pid, oldCoreId, coreId));
+    }
+    else
+    {
+	    MIGRATION_INFO(("pid %d assign to core %d\n", pid, coreId));
+    }
 
 	if(firstAssign)
 	{
 		coreSet[coreId].sumOfImportance += threadSet[pid].importance;
 		coreSet[coreId].numOfThreads++;
+        MIGRATION_INFO(("coreSet[coreId].numOfThreads = %d\n", coreSet[coreId].numOfThreads));
 		if(threadSet[pid].importance >= IMPORTANCE_MID)
+        {
 			coreSet[coreId].numOfMidThreads++;
+            MIGRATION_INFO(("coreSet[coreId].numOfThreads = %d\n", coreSet[coreId].numOfThreads));
+        }
 	}
 	else
 	{
-		oldCoreId = threadSet[pid].coreId;
-
 		coreSet[oldCoreId].sumOfImportance -= threadSet[pid].importance;
 		coreSet[coreId].sumOfImportance += threadSet[pid].importance;
 
 		coreSet[oldCoreId].numOfThreads--;
 		coreSet[coreId].numOfThreads++;
+        MIGRATION_INFO(("coreSet[oldCoreId].numOfThreads = %d, coreSet[coreId].numOfThreads = %d\n", coreSet[oldCoreId].numOfThreads, coreSet[coreId].numOfThreads));
 
 		if(threadSet[pid].importance >= IMPORTANCE_MID)
 		{
 			coreSet[oldCoreId].numOfMidThreads--;
 			coreSet[coreId].numOfMidThreads++;
+            MIGRATION_INFO(("coreSet[oldCoreId].numOfMidThreads = %d, coreSet[coreId].numOfMidThreads = %d\n", coreSet[oldCoreId].numOfMidThreads, coreSet[coreId].numOfMidThreads));
 		}
 
+        if (threadSet[pid].util != 0)
+        {
+            MIGRATION_INFO(("Change of util = %f\n", threadSet[pid].util));
+        }
 		coreSet[oldCoreId].util -= threadSet[pid].util;
 		coreSet[coreId].util += threadSet[pid].util;
 
 		if(threadSet[pid].importance >= IMPORTANCE_MID)
 		{
+            if (threadSet[pid].util != 0)
+            {
+                MIGRATION_INFO(("Change of midUtil = %f\n", threadSet[pid].util));
+            }
 			coreSet[oldCoreId].midUtil -= threadSet[pid].util;
 			coreSet[coreId].midUtil += threadSet[pid].util;
 		}
