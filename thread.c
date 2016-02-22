@@ -260,6 +260,7 @@ void calculate_utilization(void)
 			sscanf(buff, "%d %f", &pid, &execTime);
 			vector_push(pidListVec[threadSet[pid].coreId], &pid);
             execTimeDifference = execTime - threadSet[pid].execTime;
+            threadSet[pid].execTime = execTime;
             // FIXME why kernel reports decreasing execution time?
             if (execTimeDifference < 0)
             {
@@ -267,7 +268,6 @@ void calculate_utilization(void)
                 continue;
             }
 			threadSet[pid].util = execTimeDifference * get_curFreq();
-            threadSet[pid].execTime = execTime;
 			if(threadSet[pid].util != 0)
 			{
 				coreSet[threadSet[pid].coreId].numOfRunningThreads++;
