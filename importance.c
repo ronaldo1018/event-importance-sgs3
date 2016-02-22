@@ -160,6 +160,7 @@ static void aging(void);
 static void run_on_foreground_threads(void (*fn)(pid_t));
 static int event_loop();
 static void wait_for_boot_completed();
+static void check_kernel_modules();
 
 /**
  * @brief main entry function
@@ -177,6 +178,7 @@ int main(int argc, char **argv)
 	{
 		initialize_debug();
 	}
+    check_kernel_modules();
 	initialize_data_structures(); // must be initialize first because other initialize function might use
 	prioritize_self(); // change nice of this process to highest
 	initialize_cores(); // must precede initialize_threads() because we need data structure in initialize_cores() to count utilization
@@ -697,4 +699,13 @@ static void wait_for_boot_completed()
 int get_epoll_fd()
 {
     return epollfd;
+}
+
+static void check_kernel_modules()
+{
+    if (access("/sys/module/allstat", F_OK) != 0)
+    {
+        ERR(("Kernel module allstat not found!\n"));
+        exit(EXIT_FAILURE);
+    }
 }
