@@ -585,7 +585,11 @@ static void getFrequencyTable(void)
     /* on some devices time_in_state table is reversely ordered */
     qsort (freqTable, numOfFreq, sizeof (freqTable[0]), compar);
 	
+#if CONFIG_USE_CURRENT_FREQUENCY_AS_MAXIMUM
+    maxFreq = getCurFreq();
+#else
 	maxFreq = freqTable[numOfFreq -1];
+#endif
 
 	for(i = 0; i < numOfFreq; i++)
 	{

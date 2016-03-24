@@ -54,6 +54,7 @@
 #define CONFIG_USE_TIME_IN_STATE_FREQUENCY_TABLE 1
 #define CONFIG_SCALE_UP_RATIO 0.75f
 #define CONFIG_NUM_OF_HISTORY_ENTRIES 2
+#define CONFIG_USE_CURRENT_FREQUENCY_AS_MAXIMUM 1
 // DPM
 #define CONFIG_THRESHOLD2 400000 /* switch threshold of 1 or 2 core, utilsum = 400000 */
 #define CONFIG_THRESHOLD3 800000 /* switch threshold of 2 or 3 core, utilsum = 800000 */
