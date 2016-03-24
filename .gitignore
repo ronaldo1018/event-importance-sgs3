@@ -14,6 +14,7 @@
 
 # shared files
 /IImportance.cpp
+/IImportance.h
 /include/
 /lib/
 *.swp
