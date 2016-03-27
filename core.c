@@ -69,6 +69,7 @@ static unsigned int numOfFreq = 0;
  * @brief current cpu frequency
  */
 static unsigned long long curFreq;
+static unsigned long long prevFreq;
 
 /**
  * @brief maximum cpu frequency available
@@ -201,7 +202,7 @@ void initialize_cores(void)
 	{
 		changeGovernorToUserspace();
 	}
-	curFreq = getCurFreq();
+	prevFreq = curFreq = getCurFreq();
 	INFO(("max frequency = %llu\n", maxFreq));
 
 	for(i = 0; i < CONFIG_NUM_OF_PROCESS_RUNNING_HISTORY_ENTRIES; i++)
@@ -478,8 +479,28 @@ void setFreq(unsigned long long freq)
 {
     char buf[64];
     sprintf(buf, "%llu\n", freq);
+    const char *firstPath, *secondPath;
 
-	int fd = open(MIN_FREQ_PATH, O_WRONLY);
+    /*
+     * Kernel throws EINVAL if scaling_min_freq > scaling_max_freq
+     * */
+    if (freq > prevFreq)
+    {
+        firstPath = MAX_FREQ_PATH;
+        secondPath = MIN_FREQ_PATH;
+    }
+    else if (freq < prevFreq)
+    {
+        firstPath = MIN_FREQ_PATH;
+        secondPath = MAX_FREQ_PATH;
+    }
+    else /* freq == prevFreq, do nothing */
+    {
+        return;
+    }
+
+#if !CONFIG_MEASURE_OVERHEAD
+	int fd = open(firstPath, O_WRONLY);
 	if(fd < 0)
 	{
         goto error;
@@ -488,19 +509,28 @@ void setFreq(unsigned long long freq)
     write(fd, buf, strlen(buf));
     close(fd);
 
-    fd = open(MAX_FREQ_PATH, O_WRONLY);
+    fd = open(secondPath, O_WRONLY);
     if(fd < 0)
     {
         goto error;
     }
     write(fd, buf, strlen(buf));
     close(fd);
+#else
+    (void) firstPath;
+    (void) secondPath;
+#endif // !CONFIG_MEASURE_OVERHEAD
+
+    prevFreq = freq;
+
     return;
 
+#if !CONFIG_MEASURE_OVERHEAD
 error:
     ERR(("cannot set frequency\n"));
     destruction();
     exit(EXIT_FAILURE);
+#endif
 }
 
 /**
@@ -544,6 +574,7 @@ static void getFrequencyTable(void)
 	FILE *fp;
 	char buff[BUFF_SIZE];
 	char tmpstr[1024] = "";
+    unsigned long long curFreq = 0;
 	
 	numOfFreq = 0;
 	if(CONFIG_USE_TIME_IN_STATE_FREQUENCY_TABLE)
@@ -553,8 +584,12 @@ static void getFrequencyTable(void)
 		{
 			while(fgets(buff, BUFF_SIZE, fp))
 			{
-				sscanf(buff, "%llu", &freqTable[numOfFreq]);
-				numOfFreq++;
+				sscanf(buff, "%llu", &curFreq);
+                if (curFreq >= CONFIG_MINIMUM_FREQ)
+                {
+                    freqTable[numOfFreq] = curFreq;
+                    numOfFreq++;
+                }
 			}
 			fclose(fp);
 		}
@@ -660,9 +695,10 @@ static unsigned long long getProperFreq(float util)
 		{
 			if(freqTable[candidateFreqLevel] > util)
 			{
-				if(freqTable[candidateFreqLevel] * CONFIG_SCALE_UP_RATIO < util)
+				if(candidateFreqLevel < numOfFreq - 1 && freqTable[candidateFreqLevel] * CONFIG_SCALE_UP_RATIO < util)
 				{
 					candidateFreqLevel++;
+                    continue;
 				}
 				break;
 			}
@@ -698,7 +734,7 @@ static void changeGovernorToUserspace()
         goto clean_exit;
     }
     INFO(("Setting minimal frequency to %llu\n", freqTable[0]));
-    fprintf(fp, "%llu\n", freqTable[0]);
+    fprintf(fp, "%llu", freqTable[0]);
     fclose(fp);
 
     fp = fopen(MIN_FREQ_PATH, "rb");
